@@ -294,6 +294,8 @@ struct Storage: Codable, Identifiable, Hashable {
     // Explicit directory hints avoid Foundation probing a potentially stalled NFS mount.
     /// Finder shows this name, so it carries the storage type as well as the title.
     static func folderName(title: String, provider: Provider, id: String) -> String { "\(title) (\(provider.title)) · \(id.prefix(8))" }
+    /// The folder name this space should have given its current title; built-in accounts keep fixed names.
+    var expectedDirectory: String { Storage.legacy.contains(where: { $0.id == id }) ? directory : Storage.folderName(title: title, provider: provider, id: id) }
     func mountPoint(home: URL) -> URL { (FileManager.default.fileExists(atPath: home.appendingPathComponent("CloudShelf").path) ? home.appendingPathComponent("CloudShelf", isDirectory: true) : home.appendingPathComponent("OpenShelf", isDirectory: true)).appendingPathComponent(directory, isDirectory: true) }
     func cache(home: URL) -> URL { Self.folder(home, "Library/Caches").appendingPathComponent(cacheKey) }
     /// Deletes macOS metadata clutter (._* and .DS_Store); mounts cannot filter these at write time.

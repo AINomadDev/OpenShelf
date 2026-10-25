@@ -610,7 +610,7 @@ struct EditStorageView: View {
                         }
                     }
                     ShelfSection(title: "Space", subtitle: locked ? "Disconnect this drive to change its location, access or credentials." : "Changes apply the next time this drive is mounted.") {
-                        inputField(locked ? "Display name (Finder folder keeps its name until the next edit while disconnected)" : "Space name", text: $draft.name)
+                        inputField(locked ? "Display name (the Finder folder is renamed the next time this drive is mounted)" : "Space name", text: $draft.name)
                         Group {
                             inputField(storage.provider.isObjectStorage ? "Bucket or container / optional prefix" : "Folder path (optional)", text: $draft.root, prompt: storage.provider.isObjectStorage ? "my-bucket/footage" : "Leave blank for the account root")
                             Toggle("Read-only", isOn: $draft.readOnly)

@@ -366,3 +366,12 @@ do {
     precondition(shared.lastPathComponent == "cf-abc123.cftoken" && shared.path.hasSuffix("accounts/cf-abc123.cftoken"))
     print("PASS: Cloudflare token is stored per account")
 }
+
+do {
+    let space = try Storage.make(provider: .backblazeB2, title: "Old", root: "b", existing: [], readOnly: false, autoMount: false)
+    let live = try space.updating(title: "Fresh", root: "b", readOnly: false, autoMount: false, mode: .archive, keepFolder: true, existing: [space])
+    precondition(live.title == "Fresh" && live.directory == space.directory, "mounted rename keeps the folder")
+    precondition(live.expectedDirectory == "Fresh (Backblaze B2) · " + String(space.id.prefix(8)) && live.expectedDirectory != live.directory)
+    precondition(Storage.googleDrive.expectedDirectory == "Google Drive")
+    print("PASS: pending folder rename after a mounted edit")
+}

@@ -768,6 +768,20 @@ final class DriveManager: ObservableObject {
         let attributes = try? FileManager.default.attributesOfFileSystem(forPath: home.path)
         diskSpace = DiskSpace(freeBytes: (attributes?[.systemFreeSize] as? NSNumber)?.int64Value)
     }
+    /// A rename made while the drive was mounted could not move its Finder folder. Apply it now that the drive is stopped.
+    private func applyPendingFolderRename(_ storage: Storage) -> Storage {
+        guard storage.directory != storage.expectedDirectory, let index = connections.firstIndex(of: storage) else { return storage }
+        var renamed = storage
+        renamed.directory = storage.expectedDirectory
+        guard !connections.contains(where: { $0.id != storage.id && $0.directory == renamed.directory }) else { return storage }
+        var updated = connections
+        updated[index] = renamed
+        guard (try? store.save(updated)) != nil else { return storage }
+        connections = updated
+        let oldFolder = storage.mountPoint(home: home)
+        if (try? FileManager.default.contentsOfDirectory(atPath: oldFolder.path))?.isEmpty == true { try? FileManager.default.removeItem(at: oldFolder) }
+        return renamed
+    }
     func mount(_ storage: Storage) async {
         guard !Self.isPreview else { notice = "Preview mode: nothing is mounted."; return }
         guard !busy.contains(storage), !isRunning(storage), !mounted.contains(storage), let binary = rclone else { return }
@@ -778,6 +792,7 @@ final class DriveManager: ObservableObject {
             statuses[storage] = diskSpace.warning
             return
         }
+        let storage = applyPendingFolderRename(storage)
         busy.insert(storage)
         statuses[storage] = "Checking your connection…"
         let check = try? await runCommand(binary, ["lsjson", storage.remotePath, "--stat", "--retries", "1", "--low-level-retries", "1", "--contimeout", "10s", "--timeout", "15s"] + storage.configArguments(home: home))
