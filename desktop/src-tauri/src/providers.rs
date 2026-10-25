@@ -17,6 +17,7 @@ pub struct Provider {
     pub s3_flavor: Option<&'static str>,
     pub free_tier: Option<u64>,
     pub charges_egress: bool,
+    pub price_per_gb: Option<f64>,
     pub egress_note: &'static str,
     pub console_url: &'static str,
     pub steps: &'static [&'static str],
@@ -30,37 +31,47 @@ const fn f(key: &'static str, label: &'static str, secret: bool, placeholder: &'
 const S3_KEYS: [Field; 2] = [f("access_key_id", "Access key ID", false, ""), f("secret_access_key", "Secret access key", true, "")];
 
 pub const PROVIDERS: &[Provider] = &[
-    Provider { id: "r2", title: "Cloudflare R2", backend: "s3", s3_flavor: Some("Cloudflare"), free_tier: Some(10_000_000_000), charges_egress: false,
+    Provider { id: "r2", title: "Cloudflare R2", backend: "s3", s3_flavor: Some("Cloudflare"), free_tier: Some(10_000_000_000), charges_egress: false, price_per_gb: Some(0.015),
         egress_note: "R2 charges no egress fees. Storage beyond 10 GB and requests beyond the free tier are billed.",
         console_url: "https://dash.cloudflare.com/?to=/:account/r2/overview",
         steps: &["Create a bucket in R2.", "Copy your Account ID from the R2 overview page.", "Create an API token with Object Read & Write limited to that bucket.", "Paste the Account ID (or full endpoint URL) and the key pair below."],
         fields: &[f("account_id", "Account ID or endpoint URL", false, "32-character ID"), S3_KEYS[0], S3_KEYS[1]] },
-    Provider { id: "b2", title: "Backblaze B2", backend: "b2", s3_flavor: None, free_tier: Some(10_000_000_000), charges_egress: false,
+    Provider { id: "b2", title: "Backblaze B2", backend: "b2", s3_flavor: None, free_tier: Some(10_000_000_000), charges_egress: false, price_per_gb: Some(0.0069),
         egress_note: "B2 downloads are free up to 3x your average stored data, then billed per GB.",
         console_url: "https://secure.backblaze.com/b2_buckets.htm",
         steps: &["Create a private bucket.", "Add an application key restricted to that bucket.", "Copy the keyID and applicationKey now; the key is shown once."],
         fields: &[f("account", "Application key ID", false, ""), f("key", "Application key", true, "")] },
-    Provider { id: "e2", title: "IDrive e2", backend: "s3", s3_flavor: Some("IDrive"), free_tier: Some(10_000_000_000), charges_egress: false,
+    Provider { id: "e2", title: "IDrive e2", backend: "s3", s3_flavor: Some("IDrive"), free_tier: Some(10_000_000_000), charges_egress: false, price_per_gb: Some(0.005),
         egress_note: "e2 includes a free download allowance based on your stored data; check your plan.",
         console_url: "https://app.idrivee2.com/",
         steps: &["Create a bucket.", "Create an access key.", "Copy the endpoint shown for your bucket's region."],
         fields: &[f("endpoint", "Endpoint", false, "https://...idrivee2-....com"), S3_KEYS[0], S3_KEYS[1]] },
-    Provider { id: "s3", title: "Amazon S3", backend: "s3", s3_flavor: Some("AWS"), free_tier: None, charges_egress: true,
+    Provider { id: "s3", title: "Amazon S3", backend: "s3", s3_flavor: Some("AWS"), free_tier: None, charges_egress: true, price_per_gb: Some(0.023),
         egress_note: "Downloads are billed per GB. Archive here; restore only when needed.",
         console_url: "https://console.aws.amazon.com/s3/",
         steps: &["Create a private bucket.", "Create an IAM user limited to that bucket.", "Create an access key and copy both values."],
         fields: &[f("region", "Region", false, "us-east-1"), S3_KEYS[0], S3_KEYS[1]] },
-    Provider { id: "gcs", title: "Google Cloud Storage", backend: "google cloud storage", s3_flavor: None, free_tier: None, charges_egress: true,
+    Provider { id: "gcs", title: "Google Cloud Storage", backend: "google cloud storage", s3_flavor: None, free_tier: None, charges_egress: true, price_per_gb: Some(0.02),
         egress_note: "Downloads are billed per GB. Archive here; restore only when needed.",
         console_url: "https://console.cloud.google.com/storage/browser",
         steps: &["Create a bucket.", "Create a service account with Storage Object User on that bucket only.", "Download a JSON key and enter its file path. Never commit it."],
         fields: &[f("credential_file", "Service-account JSON file path", false, "/path/to/key.json")] },
-    Provider { id: "azure", title: "Azure Blob Storage", backend: "azureblob", s3_flavor: None, free_tier: None, charges_egress: true,
+    Provider { id: "azure", title: "Azure Blob Storage", backend: "azureblob", s3_flavor: None, free_tier: None, charges_egress: true, price_per_gb: Some(0.0208),
         egress_note: "Downloads are billed per GB. Archive here; restore only when needed.",
         console_url: "https://portal.azure.com/#browse/Microsoft.Storage%2FStorageAccounts",
         steps: &["Create a container.", "Generate a SAS with the permissions you need and an expiry.", "Paste the full SAS URL."],
         fields: &[f("sas_url", "SAS URL", true, "https://...")] },
-    Provider { id: "s3c", title: "S3-compatible", backend: "s3", s3_flavor: Some("Other"), free_tier: None, charges_egress: true,
+    Provider { id: "wasabi", title: "Wasabi", backend: "s3", s3_flavor: Some("Wasabi"), free_tier: None, charges_egress: false, price_per_gb: Some(0.0069),
+        egress_note: "Wasabi has no egress or request fees under its fair-use policy. Storage is billed with a 1 TB minimum and 90-day minimum retention.",
+        console_url: "https://console.wasabisys.com/",
+        steps: &["Create a bucket and note its region.", "Create an access key.", "The endpoint is s3.<region>.wasabisys.com."],
+        fields: &[f("endpoint", "Endpoint", false, "https://s3.eu-central-1.wasabisys.com"), S3_KEYS[0], S3_KEYS[1]] },
+    Provider { id: "do", title: "DigitalOcean Spaces", backend: "s3", s3_flavor: Some("DigitalOcean"), free_tier: None, charges_egress: false, price_per_gb: Some(0.02),
+        egress_note: "Spaces bundles 1 TB of outbound transfer with the base plan, then bills extra per GB.",
+        console_url: "https://cloud.digitalocean.com/spaces",
+        steps: &["Create a Space and note its region.", "Generate a Spaces key pair under API.", "The endpoint is <region>.digitaloceanspaces.com."],
+        fields: &[f("endpoint", "Endpoint", false, "https://nyc3.digitaloceanspaces.com"), S3_KEYS[0], S3_KEYS[1]] },
+    Provider { id: "s3c", title: "S3-compatible", backend: "s3", s3_flavor: Some("Other"), free_tier: None, charges_egress: true, price_per_gb: None,
         egress_note: "Check your provider's download and request pricing.",
         console_url: "",
         steps: &["Create a bucket and access key in your provider's console.", "Copy the S3 endpoint and region."],
@@ -125,7 +136,7 @@ pub fn build_config(provider: &Provider, fields: &HashMap<String, String>) -> Re
                     out.push(("endpoint".into(), format!("https://{id}.r2.cloudflarestorage.com")));
                     out.push(("region".into(), "auto".into()));
                 }
-                "e2" | "s3c" => {
+                "e2" | "wasabi" | "do" | "s3c" => {
                     let endpoint = https(&need("endpoint", "the endpoint")?);
                     if !valid_https(&endpoint) { return Err("Enter a valid HTTPS endpoint or SAS URL.".into()); }
                     out.push(("endpoint".into(), endpoint));
@@ -177,5 +188,34 @@ mod tests {
     fn every_provider_has_guide_and_fields() {
         for p in PROVIDERS { assert!(!p.steps.is_empty() && !p.fields.is_empty() && !p.egress_note.is_empty()); }
         assert!(PROVIDERS.iter().filter(|p| p.free_tier == Some(10_000_000_000)).count() == 3);
+    }
+}
+
+/// Estimated monthly storage cost in dollars at list price, after any free allowance.
+pub fn monthly_cost(provider: &Provider, used: u64) -> Option<f64> {
+    let price = provider.price_per_gb?;
+    Some(used.saturating_sub(provider.free_tier.unwrap_or(0)) as f64 / 1e9 * price)
+}
+
+#[cfg(test)]
+mod pricing_tests {
+    use super::*;
+    #[test]
+    fn estimates_after_free_tier() {
+        let r2 = find("r2").unwrap();
+        assert_eq!(monthly_cost(r2, 5_000_000_000), Some(0.0));
+        assert!((monthly_cost(r2, 110_000_000_000).unwrap() - 1.5).abs() < 1e-9);
+        assert!((monthly_cost(find("gcs").unwrap(), 17_700_000_000).unwrap() - 0.354).abs() < 1e-9);
+        assert_eq!(monthly_cost(find("s3c").unwrap(), 1), None);
+    }
+    #[test]
+    fn new_providers_build_s3_config() {
+        let mut m = HashMap::new();
+        m.insert("endpoint".to_string(), "s3.eu-central-1.wasabisys.com".to_string());
+        m.insert("access_key_id".to_string(), "k".to_string());
+        m.insert("secret_access_key".to_string(), "s".to_string());
+        let cfg = build_config(find("wasabi").unwrap(), &m).unwrap();
+        assert!(cfg.contains(&("provider".to_string(), "Wasabi".to_string())));
+        assert!(cfg.contains(&("endpoint".to_string(), "https://s3.eu-central-1.wasabisys.com".to_string())));
     }
 }

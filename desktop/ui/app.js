@@ -30,6 +30,10 @@ async function render() {
       const text = q.limit ? `${fmt(q.used)} of ${fmt(q.limit)} free tier` + (q.level === 'exceeded' ? ` — over by ${fmt(q.overage)}, pay-as-you-go applies` : ` — ${fmt(q.remaining)} left`) : `${fmt(q.used)} used`;
       card.append(bar, el('div', text, 'muted'));
     } else card.append(el('div', 'Usage not measured yet.', 'muted'));
+    if (v.provider && v.provider.price_per_gb && v.usage) {
+      const cost = Math.max(v.usage.used - (v.provider.free_tier || 0), 0) / 1e9 * v.provider.price_per_gb;
+      card.append(el('div', `Estimated storage cost: ${cost < 0.01 && cost > 0 ? '<$0.01' : '$' + cost.toFixed(2)} / month (list price, excludes requests and egress)`, 'muted'));
+    }
     if (v.provider) card.append(el('div', v.provider.egress_note, 'muted'));
     root.append(card);
     call('refresh_usage', { id: s.id, force: false }).catch(() => {});

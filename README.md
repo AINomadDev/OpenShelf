@@ -25,6 +25,7 @@ Choose **Add storage** on the dashboard:
 - **Cloudflare R2:** enter bucket/prefix, your Cloudflare account ID (the endpoint is derived), and an R2 API token's access key pair.
 - **Backblaze B2:** enter bucket/prefix and a bucket-scoped application key ID and key (native B2 API).
 - **IDrive e2:** enter bucket/prefix, the HTTPS endpoint for your bucket's region, and an access key pair.
+- **Wasabi / DigitalOcean Spaces:** enter bucket, the region's HTTPS endpoint and an access key pair. Wasabi bills a 1 TB minimum with 90-day minimum retention; Spaces bundles 1 TB of transfer into its base plan.
 - **Guided setup:** the Add storage flow shows numbered steps for each provider with an *Open console* button, and accepts a pasted R2 endpoint URL or an e2 host without `https://`.
 - **Archive mode (object storage):** S3, GCS, Azure, R2, B2, e2 and S3-compatible spaces default to archive mode: no auto-mount, longer local caching of downloaded files (72 h) and a longer directory cache so repeat access is not re-billed, a confirmation before opening in Finder, and clear cost notes. Switch a space to live mode from its card menu. Finder previews, Spotlight, and media playback still read file contents, so copy files in and restore deliberately; OpenShelf cannot block reads at the protocol level.
 - **Usage dashboard:** each connected space shows stored data. R2, B2 and e2 are compared to the 10 GB free allowance (the allowance is per provider account, so spaces sharing one account add up); Drive/iCloud show account quota when the provider reports it. Object-store usage comes from listing the space, which is billed as requests, so it is cached for 6 hours (`usage.json` beside the connection list) and refreshed on demand.
@@ -114,6 +115,13 @@ Core checks cover preserved legacy paths, multiple accounts of the same provider
 - Account details are read in memory from your own rclone config and the Google Drive API; only the email, name or host is saved, never tokens or passwords.
 
 - **Pricing info:** the ⓘ button on object-storage cards opens a pay-as-you-go summary (storage per GB, egress, request fees, free tier) with an estimated monthly storage bill for what you have stored, and a link to the provider's pricing page. These are approximate list prices for standard tiers in US regions, so check the provider before relying on them.
+
+- **Costs and budgets:** the usage panel totals the estimated monthly storage cost across spaces (free tiers are applied per space, which can overstate the total if spaces share one provider account). Set a monthly budget in **Edit details**; you are warned at 80% and when over. The archive-open confirmation shows the egress an entire restore would cost on S3, GCS and Azure.
+- **Growth forecast:** each refresh records one size sample a day (`history.json`). Once there are two days of data, free-tier spaces warn if the current growth will pass 10 GB within 60 days.
+- **Archive folder / Verify archive:** the card menu of an object-storage space can copy a local folder straight to the space (copy only, never deletes; junk, `node_modules` and `.git/objects` are skipped) and compare it afterwards by checksum. These run while the app is open, unlike mounts; re-running resumes by skipping files already uploaded.
+- **Credential health:** Azure SAS tokens are checked for their `se=` expiry and flagged in the usage panel within 14 days.
+- **Menu bar:** shows estimated cost, active uploads and spaces near their allowance.
+- Releases: pushing a `v*` tag builds unsigned macOS, Windows and Linux artifacts (`.github/workflows/release.yml`).
 
 Run `./run.sh` (macOS/Linux) or `run.cmd` (Windows) to start the right app for your OS.
 

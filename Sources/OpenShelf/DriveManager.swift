@@ -54,6 +54,8 @@ final class DriveManager: ObservableObject {
     private var store: ConnectionStore { ConnectionStore(home: home) }
     private var usageStore: UsageStore { UsageStore(home: home) }
     private var identityStore: IdentityStore { IdentityStore(home: home) }
+    private var budgetStore: BudgetStore { BudgetStore(home: home) }
+    private var historyStore: HistoryStore { HistoryStore(home: home) }
     init() {
         if Self.isPreview { loadPreviewData(); return }
         LegacyMigration.run(home: home)
@@ -61,6 +63,44 @@ final class DriveManager: ObservableObject {
         catch { notice = error.localizedDescription }
         usage = usageStore.load()
         identities = identityStore.load()
+        budgets = budgetStore.load()
+        history = historyStore.load()
+    }
+    private func recordHistory() {
+        guard !Self.isPreview else { return }
+        var changed = false
+        for (id, value) in usage where value.isReported || value.measured == true {
+            let samples = history[id] ?? []
+            // Skip when today's sample already matches, so refreshes do not rewrite the file.
+            if let last = samples.last, Calendar.current.isDateInToday(last.date), last.bytes == value.usedBytes { continue }
+            history[id] = UsageHistory.record(value.usedBytes, at: Date(), into: samples)
+            changed = true
+        }
+        if changed { historyStore.save(history) }
+    }
+    func setBudget(_ value: Double?, for storage: Storage) {
+        if let value, value > 0 { budgets[storage.id] = value } else { budgets[storage.id] = nil }
+        budgetStore.save(budgets)
+    }
+    func monthlyCost(_ storage: Storage) -> Double? {
+        guard let pricing = storage.provider.pricing, let value = usage[storage.id], value.isReported || value.measured == true else { return nil }
+        return pricing.monthlyStorageCost(usedBytes: value.usedBytes)
+    }
+    var monthlyTotal: Double {
+        CostSummary.monthlyTotal(connections.compactMap { storage in
+            guard let value = usage[storage.id], value.isReported || value.measured == true else { return nil }
+            return (storage.provider, value.usedBytes)
+        })
+    }
+    func budgetLevel(_ storage: Storage) -> BudgetLevel { Budget.level(cost: monthlyCost(storage) ?? 0, budget: budgets[storage.id]) }
+    /// Days until a free-tier space passes its allowance at the recent growth rate.
+    func daysUntilFreeTier(_ storage: Storage) -> Int? {
+        guard let limit = storage.provider.freeTierBytes, usage[storage.id]?.totalBytes == nil else { return nil }
+        return UsageHistory.daysUntil(limit: limit, samples: history[storage.id] ?? [])
+    }
+    func restoreCost(_ storage: Storage) -> Double? {
+        guard let bytes = usage[storage.id]?.usedBytes, bytes > 0 else { return nil }
+        return RestoreCost.estimate(bytes: bytes, provider: storage.provider)
     }
     func add(_ storage: Storage) throws {
         let updated = connections + [storage]
@@ -132,7 +172,9 @@ final class DriveManager: ObservableObject {
     @Published var mounted: Set<Storage> = []
     @Published var busy: Set<Storage> = []
     @Published var activity: [Storage: CacheActivity] = [:]
-    @Published var usage: [String: StorageUsage] = [:]
+    @Published var usage: [String: StorageUsage] = [:] { didSet { recordHistory() } }
+    @Published var budgets: [String: Double] = [:]
+    @Published var history: [String: [UsageSample]] = [:]
     @Published var identities: [String: AccountIdentity] = [:]
     private var identityRefreshing: Set<String> = []
     private var lastIdentityAttempt: [String: Date] = [:]
@@ -295,6 +337,58 @@ final class DriveManager: ObservableObject {
             let recentlyTried = lastUsageAttempt[storage.id].map { $0.timeIntervalSinceNow > -Self.usageRetry } ?? false
             if !fresh && !recentlyTried && usageRefreshing.isEmpty { refreshUsage(storage); return }
         }
+    }
+    /// Uploads a local folder straight to the space (no Finder mount needed). Runs while the app is open.
+    func archiveFolder(_ storage: Storage, subfolder: String? = nil) {
+        guard !Self.isPreview, !busy.contains(storage), let binary = rclone else { return }
+        guard !storage.readOnly else { notice = "\(storage.title) is read-only."; return }
+        guard let folder = chooseFolder("Choose a folder to archive to \(storage.title)") else { return }
+        let target = subfolder ?? folder.lastPathComponent
+        busy.insert(storage)
+        notice = "Uploading \(folder.lastPathComponent) to \(storage.title)… You can keep using the app; keep it open until this finishes."
+        let arguments = storage.archiveCopyArguments(source: folder, subfolder: target, home: home)
+        Task { [weak self] in
+            let result = try? await runCommand(binary, arguments, timeoutSeconds: 86_400)
+            guard let self else { return }
+            self.busy.remove(storage)
+            if result?.code == 0 {
+                self.notice = "Archived \(folder.lastPathComponent) to \(storage.title). Use Verify archive to confirm the copy."
+                self.forceUsage.insert(storage.id)
+                self.refreshUsage(storage)
+            } else {
+                self.notice = "The upload did not finish. Check your connection and credentials, then run it again; already uploaded files are skipped."
+            }
+        }
+    }
+    /// Compares a local folder with the archived copy by checksum; it never changes either side.
+    func verifyArchive(_ storage: Storage) {
+        guard !Self.isPreview, !busy.contains(storage), let binary = rclone else { return }
+        guard let folder = chooseFolder("Choose the local folder to compare with \(storage.title)") else { return }
+        busy.insert(storage)
+        notice = "Verifying \(folder.lastPathComponent)…"
+        let arguments = storage.verifyArguments(source: folder, subfolder: folder.lastPathComponent, home: home)
+        Task { [weak self] in
+            let result = try? await runCommand(binary, arguments, timeoutSeconds: 86_400)
+            guard let self else { return }
+            self.busy.remove(storage)
+            switch result?.code {
+            case 0?: self.notice = "Verified: every file in \(folder.lastPathComponent) is safely stored in \(storage.title)."
+            case 1?: self.notice = "Some files in \(folder.lastPathComponent) are missing or differ in \(storage.title). Run Archive folder again."
+            default: self.notice = "Could not verify. Check the connection and that the folder was archived under its own name."
+            }
+        }
+    }
+    private func chooseFolder(_ message: String) -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.message = message; panel.prompt = "Choose"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+    func credentialWarning(_ storage: Storage) -> String? {
+        guard storage.ownConfig, storage.provider == .azureBlob,
+              let text = try? String(contentsOf: storage.configURL(home: home), encoding: .utf8),
+              let sas = CredentialHealth.configValue("sas_url", in: text) else { return nil }
+        return CredentialHealth.warning(expiry: CredentialHealth.sasExpiry(sas))
     }
     func cleanJunk(_ storage: Storage) {
         guard !Self.isPreview, !busy.contains(storage), let binary = rclone else { return }

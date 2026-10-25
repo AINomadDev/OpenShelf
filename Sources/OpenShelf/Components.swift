@@ -17,6 +17,8 @@ enum ShelfTheme {
         case .cloudflareR2: return Color(red: 0.90, green: 0.45, blue: 0.10)
         case .backblazeB2: return Color(red: 0.80, green: 0.18, blue: 0.20)
         case .idriveE2: return Color(red: 0.12, green: 0.55, blue: 0.55)
+        case .wasabi: return Color(red: 0.2, green: 0.62, blue: 0.35)
+        case .digitalOceanSpaces: return Color(red: 0.0, green: 0.41, blue: 1.0)
         case .other: return muted
         }
     }

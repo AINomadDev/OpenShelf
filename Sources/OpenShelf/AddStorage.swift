@@ -18,6 +18,7 @@ final class ConnectionDraft: ObservableObject {
     @Published var working = false
     @Published var message: String?
     @Published var replacingCredentials = false
+    @Published var budgetText = ""
     @Published var tagsText = ""
     @Published var note = ""
     private var authProcess: Process?
@@ -117,7 +118,7 @@ final class ConnectionDraft: ObservableObject {
                 manager.showingAddStorage = false
                 manager.setup(storage)
                 return
-            case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .backblazeB2, .gcs, .azureBlob:
+            case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces, .backblazeB2, .gcs, .azureBlob:
                 try objectStorageValues(&values, required: required)
             case .other: throw SetupError.missing("provider")
             }
@@ -137,7 +138,7 @@ final class ConnectionDraft: ObservableObject {
     // Credential values for every key-based object-storage provider; shared by new connections and credential replacement.
     private func objectStorageValues(_ values: inout [String: String], required: (String, String) throws -> String) throws {
         switch provider {
-        case .s3, .s3Compatible, .cloudflareR2, .idriveE2:
+        case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces:
             try s3Values(&values, required: required)
         case .backblazeB2:
             values["account"] = try required("account", "application key ID")
@@ -231,7 +232,7 @@ final class ConnectionDraft: ObservableObject {
             guard let account = EndpointInput.r2AccountID(try required("account_id", "Cloudflare account ID")) else { throw SetupError.endpoint }
             values["endpoint"] = "https://\(account).r2.cloudflarestorage.com"
             values["region"] = "auto"
-        case .s3Compatible, .idriveE2:
+        case .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces:
             let endpoint = EndpointInput.https(try required("endpoint", "HTTPS endpoint"))
             guard let url = URL(string: endpoint), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil else { throw SetupError.endpoint }
             values["endpoint"] = endpoint
@@ -464,7 +465,7 @@ struct AddStorageView: View {
                 switch draft.provider {
                 case .googleDrive: required = draft.reuseGoogleClient ? [] : ["client_id", "client_secret"]
                 case .s3: required = ["access_key_id", "secret_access_key"]
-                case .s3Compatible, .idriveE2: required = ["endpoint", "access_key_id", "secret_access_key"]
+                case .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces: required = ["endpoint", "access_key_id", "secret_access_key"]
                 case .cloudflareR2: required = ["account_id", "access_key_id", "secret_access_key"]
                 case .backblazeB2: required = ["account", "key"]
                 case .gcs: required = ["credential_file"]
@@ -540,6 +541,11 @@ struct ProviderFields: View {
             inputField("Access key ID", text: draft.value("access_key_id"))
             secretField("Secret access key", text: draft.value("secret_access_key"))
             Text("Copy the endpoint shown for your bucket's region in the IDrive e2 dashboard.").font(.caption).foregroundStyle(.secondary)
+        case .wasabi, .digitalOceanSpaces:
+            inputField("HTTPS endpoint", text: draft.value("endpoint"), prompt: draft.provider == .wasabi ? "https://s3.eu-central-1.wasabisys.com" : "https://nyc3.digitaloceanspaces.com")
+            inputField("Access key ID", text: draft.value("access_key_id"))
+            secretField("Secret access key", text: draft.value("secret_access_key"))
+            Text("The endpoint depends on the region you created the bucket in; see the setup steps above.").font(.caption).foregroundStyle(.secondary)
         case .gcs:
             HStack {
                 Text(draft.fields["credential_file"].map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Service-account JSON credentials")
@@ -575,6 +581,9 @@ struct EditStorageView: View {
                     ShelfSection(title: "Labels", subtitle: "Shown on the card and searchable. Safe to change any time.") {
                         inputField("Tags (comma separated)", text: $draft.tagsText, prompt: "work, family, backup")
                         inputField("Note", text: $draft.note, prompt: "What is this space for?")
+                        if storage.provider.pricing != nil {
+                            inputField("Monthly budget in USD (optional, alerts at 80%)", text: $draft.budgetText, prompt: "e.g. 5")
+                        }
                     }
                     ShelfSection(title: "Space", subtitle: locked ? "Disconnect this drive to change its location, access or credentials." : "Changes apply the next time this drive is mounted.") {
                         inputField(locked ? "Display name (Finder folder keeps its name until the next edit while disconnected)" : "Space name", text: $draft.name)
@@ -602,10 +611,10 @@ struct EditStorageView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { manager.spaceToEdit = nil }.buttonStyle(ShelfButtonStyle())
-                Button(draft.working ? "Saving…" : "Save") { Task { await draft.saveEdits(manager, original: storage) } }
+                Button(draft.working ? "Saving…" : "Save") { manager.setBudget(Double(draft.budgetText.trimmingCharacters(in: .whitespaces)), for: storage); Task { await draft.saveEdits(manager, original: storage) } }
                     .buttonStyle(ShelfButtonStyle(prominent: true)).disabled(draft.working)
             }
         }.padding(26).frame(width: 520, height: 600).background(ShelfTheme.paper)
-            .onAppear { draft.load(from: storage) }
+            .onAppear { draft.load(from: storage); draft.budgetText = manager.budgets[storage.id].map { String($0) } ?? "" }
     }
 }

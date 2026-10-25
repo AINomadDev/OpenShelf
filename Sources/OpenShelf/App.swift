@@ -46,6 +46,16 @@ struct MenuContent: View {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
         Divider()
+        if manager.connections.contains(where: { $0.provider.pricing != nil }) {
+            Text("Est. storage cost: \(PricingInfo.dollars(manager.monthlyTotal)) / month")
+        }
+        ForEach(manager.connections.filter { manager.activity[$0].map { $0.diskCache.uploadsInProgress + $0.diskCache.uploadsQueued > 0 } == true }) { storage in
+            Text("Uploading to \(storage.title)…")
+        }
+        ForEach(manager.connections.filter { storage in storage.quota(for: manager.usage[storage.id]).map { $0.level == .exceeded || $0.level == .warning } == true }) { storage in
+            Text("⚠︎ \(storage.title) is near or over its allowance")
+        }
+        Divider()
         ForEach(manager.connections) { storage in
             Button("\(manager.mounted.contains(storage) ? "Open" : "Connect") \(storage.title)") {
                 openWindow(id: "dashboard")
@@ -147,7 +157,7 @@ struct Dashboard: View {
                 if let storage = manager.archiveToOpen { manager.open(storage) }
                 manager.archiveToOpen = nil
             }
-        } message: { Text((manager.archiveToOpen?.provider.egressNote ?? "Downloads may be billed by your provider.") + " Finder previews, Spotlight, and playing media read file contents. Prefer copying files in rather than browsing them.") }
+        } message: { Text((manager.archiveToOpen?.provider.egressNote ?? "Downloads may be billed by your provider.") + (manager.archiveToOpen.flatMap { manager.restoreCost($0) }.map { " Reading everything stored here would cost about \(PricingInfo.dollars($0)) in egress." } ?? "") + " Finder previews, Spotlight, and playing media read file contents. Prefer copying files in rather than browsing them.") }
         .confirmationDialog("Remove this saved space?", isPresented: Binding(get: { manager.spaceToRemove != nil }, set: { if !$0 { manager.spaceToRemove = nil } }), titleVisibility: .visible) {
             Button("Remove space", role: .destructive) {
                 if let storage = manager.spaceToRemove { manager.remove(storage) }
@@ -157,6 +167,32 @@ struct Dashboard: View {
         .alert("OpenShelf", isPresented: Binding(get: { manager.notice != nil }, set: { if !$0 { manager.notice = nil } })) {
             Button("OK") { manager.notice = nil }
         } message: { Text(manager.notice ?? "") }
+    }
+    private var insightsSummary: some View {
+        let alerts = manager.connections.compactMap { storage -> (Storage, String, Bool)? in
+            switch manager.budgetLevel(storage) {
+            case .exceeded: return (storage, "\(storage.title) is over its \(PricingInfo.dollars(manager.budgets[storage.id] ?? 0)) monthly budget", true)
+            case .nearing: return (storage, "\(storage.title) is near its \(PricingInfo.dollars(manager.budgets[storage.id] ?? 0)) monthly budget", false)
+            default:
+                if let days = manager.daysUntilFreeTier(storage), days > 0, days <= 60 { return (storage, "\(storage.title) may pass its free tier in about \(days) days at the current growth", false) }
+                return nil
+            }
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            if manager.connections.contains(where: { $0.provider.pricing != nil }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "dollarsign.circle").foregroundStyle(ShelfTheme.muted)
+                    Text("Estimated storage cost: \(PricingInfo.dollars(manager.monthlyTotal)) / month").font(.system(size: 12, weight: .semibold))
+                    Text("list prices, excludes requests and egress").font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+                }
+            }
+            ForEach(manager.connections.compactMap { storage in manager.credentialWarning(storage).map { (storage, "\(storage.title): \($0)") } }, id: \.0.id) { item in
+                Label(item.1, systemImage: "key.fill").font(.system(size: 11)).foregroundStyle(Color.orange)
+            }
+            ForEach(alerts, id: \.0.id) { alert in
+                Label(alert.1, systemImage: alert.2 ? "exclamationmark.triangle.fill" : "bell.badge").font(.system(size: 11)).foregroundStyle(alert.2 ? Color.red : Color.orange)
+            }
+        }
     }
     private var usagePanel: some View {
         let rows = manager.connections.filter { manager.configured.contains($0) || manager.usage[$0.id] != nil }
@@ -170,6 +206,7 @@ struct Dashboard: View {
                 Button { manager.refreshAllUsage() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .buttonStyle(ShelfButtonStyle()).disabled(!manager.usageRefreshing.isEmpty || rows.isEmpty)
             }
+            insightsSummary
             if rows.isEmpty {
                 Text("Usage appears once a space is connected.").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
             }
@@ -355,6 +392,10 @@ struct StorageCard: View {
                 Button(storage.isArchive ? "Switch to live mode" : "Switch to archive mode") { manager.setMode(storage, storage.isArchive ? .live : .archive) }
             }
             if storage.provider.isObjectStorage {
+                if storage.provider.isObjectStorage && !storage.readOnly {
+                    Button("Archive folder to this space…") { manager.archiveFolder(storage) }.disabled(isBusy)
+                    Button("Verify archive…") { manager.verifyArchive(storage) }.disabled(isBusy)
+                }
                 Button("Clean junk files (._*, .DS_Store)") { manager.cleanJunk(storage) }.disabled(isMounted || manager.isRunning(storage) || isBusy)
             }
             Divider()
