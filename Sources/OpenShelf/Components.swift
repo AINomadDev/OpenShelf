@@ -64,6 +64,22 @@ struct ShelfSection<Content: View>: View {
     }
 }
 
+// Structured pieces of a usage line so cards can lay them out as a headline, a limit and a remainder.
+struct UsageBreakdown {
+    let used: String
+    let limit: String?
+    let remaining: String?
+    let caption: String?
+    let warning: String?
+    static func make(_ quota: QuotaStatus, freeTier: Bool, accountName: String?) -> UsageBreakdown {
+        let bytes = UsageText.bytes
+        let scope = accountName.map { "Whole \($0) account" } ?? (freeTier ? "Free tier" : nil)
+        guard let limit = quota.limit else { return UsageBreakdown(used: bytes(quota.used), limit: nil, remaining: nil, caption: "stored", warning: nil) }
+        let warning = quota.level == .exceeded ? (freeTier ? "Free tier used up · \(bytes(quota.overage)) billed pay-as-you-go" : "Full") : nil
+        return UsageBreakdown(used: bytes(quota.used), limit: "of " + bytes(limit), remaining: quota.level == .exceeded ? nil : bytes(quota.remaining ?? 0) + " left", caption: scope, warning: warning)
+    }
+}
+
 enum UsageText {
     static func bytes(_ value: Int64) -> String { ByteCountFormatter.string(fromByteCount: value, countStyle: .file) }
     // One-line summary shared by the space card and the usage panel.

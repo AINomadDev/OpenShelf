@@ -126,7 +126,7 @@ struct Dashboard: View {
                                 }.buttonStyle(ShelfButtonStyle())
                             }.padding(32).frame(maxWidth: .infinity).background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18))
                         }
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: .infinity), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
                             ForEach(manager.visibleConnections) { StorageCard(storage: $0, manager: manager) }
                         }
                         HStack(alignment: .top, spacing: 10) {
@@ -307,96 +307,138 @@ struct StorageCard: View {
     private var isMounted: Bool { manager.mounted.contains(storage) }
     private var isConfigured: Bool { manager.configured.contains(storage) }
     private var isBusy: Bool { manager.busy.contains(storage) }
+    private var statusText: String { isBusy ? "Connecting" : isMounted ? "Mounted" : isConfigured ? "Saved" : "Not connected" }
+    private var subtitle: String { storage.provider.title + (storage.root.isEmpty ? "" : " · " + storage.root) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                ProviderBadge(provider: storage.provider)
-                Spacer()
-                HStack(spacing: 5) {
-                    Circle().fill(isMounted ? Color.green : ShelfTheme.muted.opacity(0.5)).frame(width: 5, height: 5)
-                    Text(isBusy ? "Connecting" : isMounted ? "Mounted" : isConfigured ? "Saved" : "Not connected")
-                }.font(.system(size: 10, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 6)
-                    .background(isMounted ? Color.green.opacity(0.07) : paper, in: Capsule())
-                Menu {
-                    Button("Edit details…") { manager.spaceToEdit = storage }
-                    if manager.usage[storage.id]?.isReported == false {
-                        Button("Measure size now") { manager.measureSize(storage) }.disabled(manager.usageRefreshing.contains(storage.id))
-                    }
-                    Button("Copy Finder path") { manager.copyPath(storage) }
-                    Button("View log") { manager.showLog(storage) }
-                    if storage.provider.prefersArchive {
-                        Button(storage.isArchive ? "Switch to live mode" : "Switch to archive mode") { manager.setMode(storage, storage.isArchive ? .live : .archive) }
-                    }
-                    if storage.provider.isObjectStorage {
-                        Button("Clean junk files (._*, .DS_Store)") { manager.cleanJunk(storage) }.disabled(isMounted || manager.isRunning(storage) || isBusy)
-                    }
-                    Divider()
-                    Button("Remove space…", role: .destructive) { manager.spaceToRemove = storage }.disabled(isMounted || manager.isRunning(storage) || isBusy)
-                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().help("Space actions")
-            }
-            VStack(alignment: .leading, spacing: 5) {
-                Text(storage.title).font(.system(size: 20, weight: .semibold, design: .rounded)).tracking(-0.4).lineLimit(2).frame(minHeight: 48, alignment: .topLeading)
-                Text(storage.provider.title + (storage.root.isEmpty ? "" : " · " + storage.root)).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted).lineLimit(2).frame(minHeight: 32, alignment: .topLeading)
-                if let who = manager.identities[storage.id], let line = who.email ?? who.detail {
-                    Label(who.name.map { $0 + " · " + line } ?? line, systemImage: who.email != nil ? "person.crop.circle" : "server.rack")
-                        .font(.system(size: 10, weight: .medium)).foregroundStyle(ShelfTheme.muted).lineLimit(1).truncationMode(.middle).help(line)
-                }
-                if !storage.tags.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(storage.tags, id: \.self) { Text($0).font(.system(size: 9, weight: .semibold)).padding(.horizontal, 6).padding(.vertical, 2).background(ShelfTheme.accent.opacity(0.4), in: Capsule()) }
-                    }.lineLimit(1)
-                }
-                if !storage.note.isEmpty { Text(storage.note).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted).lineLimit(2) }
-                Label(storage.isArchive ? (storage.provider.chargesEgress ? "Archive · downloads may cost money" : "Archive · no egress fees") : "Live · files open on demand", systemImage: storage.isArchive ? "archivebox" : "bolt").font(.system(size: 10, weight: .medium)).foregroundStyle(ShelfTheme.muted)
-            }
-            HStack {
-                Label(storage.readOnly ? "Read-only" : "Read & write", systemImage: storage.readOnly ? "lock" : "pencil")
-                Spacer()
-                Toggle("Auto-mount", isOn: Binding(get: { storage.autoMount }, set: { manager.setAutoMount(storage, enabled: $0) })).toggleStyle(.switch).controlSize(.mini)
-            }.font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
-            Divider().opacity(0.5)
-            VStack(alignment: .leading, spacing: 7) {
-                VStack(alignment: .leading, spacing: 5) {
-                    if let quota = storage.quota(for: manager.usage[storage.id]) {
-                        Text(UsageText.summary(quota, freeTier: storage.provider.freeTierBytes != nil && manager.usage[storage.id]?.totalBytes == nil, accountName: manager.usage[storage.id]?.accountWide == true ? storage.provider.accountName : nil))
-                            .font(.system(size: 11, weight: .medium)).foregroundStyle(quota.level == .exceeded ? Color.red : ShelfTheme.ink)
-                        if quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
-                    } else {
-                        Text(manager.usage[storage.id]?.isReported == false ? (manager.usage[storage.id]?.measured == true ? UsageText.unreported(manager.usage[storage.id]) : "Storage total not reported · use ⋯ › Measure size") : "Measuring storage…")
-                            .font(.system(size: 11)).foregroundStyle(ShelfTheme.muted)
-                        Color.clear.frame(height: 6)
-                    }
-                }
-                if let stats = manager.activity[storage] {
-                    HStack {
-                        Text(ByteCountFormatter.string(fromByteCount: stats.diskCache.bytesUsed, countStyle: .file)).fontWeight(.semibold)
-                        Text("cached").foregroundStyle(ShelfTheme.muted)
-                        Spacer()
-                        Text(stats.diskCache.uploadsInProgress + stats.diskCache.uploadsQueued > 0 ? "\(stats.diskCache.uploadsInProgress + stats.diskCache.uploadsQueued) pending" : stats.diskCache.outOfSpace || stats.diskCache.erroredFiles > 0 ? "Needs attention" : "No uploads").foregroundStyle(ShelfTheme.muted)
-                    }.font(.system(size: 11))
-                }
-                Text(manager.statuses[storage] ?? (isConfigured ? "Ready when you are." : "Connect this account to get started."))
-                    .font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).lineLimit(3).frame(minHeight: 28, alignment: .top)
-            }
-            Spacer(minLength: 0)
-            HStack(spacing: 8) {
-                Button {
-                    if isMounted { if storage.isArchive && storage.provider.chargesEgress { manager.archiveToOpen = storage } else { manager.open(storage) } }
-                    else if isConfigured { Task { await manager.mount(storage) } }
-                    else { manager.setup(storage) }
-                } label: {
-                    HStack {
-                        if isBusy { ProgressView().controlSize(.small) }
-                        Text(isMounted ? "Open in Finder" : isBusy ? "Connecting…" : isConfigured ? "Mount drive" : "Connect")
-                        Spacer(minLength: 6)
-                        Image(systemName: isMounted ? "arrow.up.right" : "arrow.right")
-                    }
-                }.buttonStyle(ShelfButtonStyle(prominent: true)).disabled(isBusy || manager.rclone == nil || (manager.isRunning(storage) && !isMounted))
-                Button(isMounted ? "Disconnect" : "Reconnect") {
-                    if isMounted { Task { await manager.unmount(storage) } } else { manager.setup(storage) }
-                }.buttonStyle(ShelfButtonStyle()).disabled(isBusy || (!isMounted && (!isConfigured || manager.isRunning(storage))))
-            }
-        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.white, in: RoundedRectangle(cornerRadius: 19))
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            VStack(alignment: .leading, spacing: 8) { identity; modeRow }.padding(.top, 14)
+            usageBlock.padding(.top, 16)
+            Spacer(minLength: 14)
+            footer
+        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 19))
             .overlay(RoundedRectangle(cornerRadius: 19).stroke(ink.opacity(0.075)))
+    }
+    private var header: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ProviderBadge(provider: storage.provider, size: 42)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(storage.title).font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.3).lineLimit(1)
+                Text(subtitle).font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).lineLimit(1).truncationMode(.middle).help(subtitle)
+            }
+            Spacer(minLength: 4)
+            HStack(spacing: 5) {
+                Circle().fill(isMounted ? Color.green : ShelfTheme.muted.opacity(0.5)).frame(width: 6, height: 6)
+                Text(statusText)
+            }.font(.system(size: 10, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 5)
+                .background(isMounted ? Color.green.opacity(0.09) : paper, in: Capsule())
+            actionMenu
+        }
+    }
+    private var actionMenu: some View {
+        Menu {
+            Button("Edit details…") { manager.spaceToEdit = storage }
+            if manager.usage[storage.id]?.isReported == false {
+                Button("Measure size now") { manager.measureSize(storage) }.disabled(manager.usageRefreshing.contains(storage.id))
+            }
+            Button("Copy Finder path") { manager.copyPath(storage) }
+            Button("View log") { manager.showLog(storage) }
+            if storage.provider.prefersArchive {
+                Button(storage.isArchive ? "Switch to live mode" : "Switch to archive mode") { manager.setMode(storage, storage.isArchive ? .live : .archive) }
+            }
+            if storage.provider.isObjectStorage {
+                Button("Clean junk files (._*, .DS_Store)") { manager.cleanJunk(storage) }.disabled(isMounted || manager.isRunning(storage) || isBusy)
+            }
+            Divider()
+            Button("Remove space…", role: .destructive) { manager.spaceToRemove = storage }.disabled(isMounted || manager.isRunning(storage) || isBusy)
+        } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Space actions")
+    }
+    // Account line, tags and note share one block so every card starts its usage panel at a similar height.
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let who = manager.identities[storage.id], let line = who.email ?? who.detail {
+                HStack(spacing: 6) {
+                    Image(systemName: who.email != nil ? "person.crop.circle" : "server.rack").frame(width: 14)
+                    Text(who.name.map { $0 + " · " + line } ?? line).lineLimit(1).truncationMode(.middle)
+                }.font(.system(size: 11, weight: .medium)).foregroundStyle(ink.opacity(0.75)).help(line)
+            }
+            if !storage.tags.isEmpty {
+                HStack(spacing: 5) {
+                    ForEach(storage.tags.prefix(4), id: \.self) { Text($0).font(.system(size: 9, weight: .semibold)).lineLimit(1).padding(.horizontal, 7).padding(.vertical, 3).background(ShelfTheme.accent.opacity(0.45), in: Capsule()) }
+                }
+            }
+            if !storage.note.isEmpty { Text(storage.note).font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).lineLimit(2) }
+        }
+    }
+    private var modeRow: some View {
+        HStack(spacing: 6) {
+            chip(storage.isArchive ? "archivebox" : "bolt", storage.isArchive ? (storage.provider.chargesEgress ? "Archive · downloads cost" : "Archive · no egress") : "Live")
+            chip(storage.readOnly ? "lock" : "pencil", storage.readOnly ? "Read-only" : "Read & write")
+            Spacer(minLength: 4)
+            Toggle("Auto-mount", isOn: Binding(get: { storage.autoMount }, set: { manager.setAutoMount(storage, enabled: $0) })).toggleStyle(.switch).controlSize(.mini).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+        }
+    }
+    private func chip(_ symbol: String, _ text: String) -> some View {
+        Label(text, systemImage: symbol).font(.system(size: 10, weight: .medium)).lineLimit(1).foregroundStyle(ShelfTheme.muted)
+            .padding(.horizontal, 8).padding(.vertical, 4).background(paper, in: Capsule())
+    }
+    private var usageBlock: some View {
+        let value = manager.usage[storage.id]
+        return VStack(alignment: .leading, spacing: 9) {
+            if let quota = storage.quota(for: value) {
+                let parts = UsageBreakdown.make(quota, freeTier: storage.provider.freeTierBytes != nil && value?.totalBytes == nil, accountName: value?.accountWide == true ? storage.provider.accountName : nil)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(parts.used).font(.system(size: 22, weight: .semibold, design: .rounded)).tracking(-0.4).foregroundStyle(quota.level == .exceeded ? Color.red : ink)
+                    if let limit = parts.limit { Text(limit).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted) }
+                    Spacer(minLength: 4)
+                    if let remaining = parts.remaining { Text(remaining).font(.system(size: 12, weight: .semibold)).foregroundStyle(quota.level == .warning ? Color.orange : ink) }
+                }
+                if quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
+                Text(parts.warning ?? parts.caption ?? " ").font(.system(size: 10)).foregroundStyle(parts.warning != nil ? Color.red : ShelfTheme.muted).lineLimit(2)
+            } else {
+                let unreported = value?.isReported == false
+                Text(unreported ? (value?.measured == true ? UsageText.bytes(value?.usedBytes ?? 0) : "—") : "…").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(unreported && value?.measured != true ? ShelfTheme.muted : ink)
+                Color.clear.frame(height: 6)
+                Text(unreported ? (value?.measured == true ? "Measured by listing files" : "Total not reported · ⋯ › Measure size") : "Measuring storage…").font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+            }
+            Divider().opacity(0.5)
+            if let stats = manager.activity[storage] {
+                let pending = stats.diskCache.uploadsInProgress + stats.diskCache.uploadsQueued
+                HStack(spacing: 0) {
+                    stat(ByteCountFormatter.string(fromByteCount: stats.diskCache.bytesUsed, countStyle: .file), "cached")
+                    Spacer()
+                    stat(pending > 0 ? "\(pending) pending" : stats.diskCache.outOfSpace || stats.diskCache.erroredFiles > 0 ? "Needs attention" : "None", "uploads", tint: pending > 0 ? .orange : (stats.diskCache.outOfSpace || stats.diskCache.erroredFiles > 0 ? .red : nil), trailing: true)
+                }
+            } else {
+                Text(manager.statuses[storage] ?? (isConfigured ? "Ready when you are." : "Connect this account to get started."))
+                    .font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).lineLimit(2).frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+            }
+        }
+    }
+    private func stat(_ value: String, _ label: String, tint: Color? = nil, trailing: Bool = false) -> some View {
+        VStack(alignment: trailing ? .trailing : .leading, spacing: 2) {
+            Text(value).font(.system(size: 12, weight: .semibold)).foregroundStyle(tint ?? ink)
+            Text(label).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+        }
+    }
+    private var footer: some View {
+        HStack(spacing: 8) {
+            Button {
+                if isMounted { if storage.isArchive && storage.provider.chargesEgress { manager.archiveToOpen = storage } else { manager.open(storage) } }
+                else if isConfigured { Task { await manager.mount(storage) } }
+                else { manager.setup(storage) }
+            } label: {
+                HStack {
+                    if isBusy { ProgressView().controlSize(.small) }
+                    Text(isMounted ? "Open in Finder" : isBusy ? "Connecting…" : isConfigured ? "Mount drive" : "Connect").lineLimit(1)
+                    Spacer(minLength: 6)
+                    Image(systemName: isMounted ? "arrow.up.right" : "arrow.right")
+                }
+            }.buttonStyle(ShelfButtonStyle(prominent: true)).disabled(isBusy || manager.rclone == nil || (manager.isRunning(storage) && !isMounted))
+            Button(isMounted ? "Disconnect" : "Reconnect") {
+                if isMounted { Task { await manager.unmount(storage) } } else { manager.setup(storage) }
+            }.buttonStyle(ShelfButtonStyle()).disabled(isBusy || (!isMounted && (!isConfigured || manager.isRunning(storage))))
+        }
     }
 }
