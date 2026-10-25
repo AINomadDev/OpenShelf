@@ -186,7 +186,7 @@ final class ConnectionDraft: ObservableObject {
             let tags = TagInput.parse(tagsText)
             // A mounted drive keeps its name, path, access and credentials; only labels, auto-mount and mode can change.
             if !manager.canEdit(original) {
-                let live = try original.updating(title: original.title, root: original.root, readOnly: original.readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, existing: manager.connections)
+                let live = try original.updating(title: name, root: original.root, readOnly: original.readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, keepFolder: true, existing: manager.connections)
                 try manager.applyLiveEdit(original, with: live)
                 manager.spaceToEdit = nil
                 return
@@ -576,9 +576,9 @@ struct EditStorageView: View {
                         inputField("Tags (comma separated)", text: $draft.tagsText, prompt: "work, family, backup")
                         inputField("Note", text: $draft.note, prompt: "What is this space for?")
                     }
-                    ShelfSection(title: "Space", subtitle: locked ? "Disconnect this drive to change its name, location, access or credentials." : "Changes apply the next time this drive is mounted.") {
+                    ShelfSection(title: "Space", subtitle: locked ? "Disconnect this drive to change its location, access or credentials." : "Changes apply the next time this drive is mounted.") {
+                        inputField(locked ? "Display name (Finder folder keeps its name until the next edit while disconnected)" : "Space name", text: $draft.name)
                         Group {
-                            inputField("Space name", text: $draft.name)
                             inputField(storage.provider.isObjectStorage ? "Bucket or container / optional prefix" : "Folder path (optional)", text: $draft.root, prompt: storage.provider.isObjectStorage ? "my-bucket/footage" : "Leave blank for the account root")
                             Toggle("Read-only", isOn: $draft.readOnly)
                         }.disabled(locked).opacity(locked ? 0.55 : 1)

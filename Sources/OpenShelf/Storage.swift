@@ -57,6 +57,13 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
     // Free allowance advertised by pay-as-you-go archive providers; nil when there is no fixed allowance.
     // iCloud Drive exposes no storage-info call; Google Shared Drives report none either (detected at refresh time).
     var reportsQuota: Bool { self != .iCloud }
+    var accountName: String? {
+        switch self {
+        case .googleDrive: return "Google"
+        case .iCloud: return "iCloud"
+        default: return nil
+        }
+    }
     var freeTierBytes: Int64? { [.cloudflareR2, .backblazeB2, .idriveE2].contains(self) ? 10_000_000_000 : nil }
     // Providers where reading data back can produce a surprise bill.
     var chargesEgress: Bool { [.s3, .gcs, .azureBlob, .s3Compatible].contains(self) }
@@ -138,6 +145,14 @@ struct QuotaStatus: Equatable {
 }
 
 extension StorageUsage {
+    /// Decodes iCloud's `storageUsageInfo` response (whole-account totals, not one folder).
+    static func fromICloud(_ data: Data, now: Date = Date()) -> StorageUsage? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let info = object["storageUsageInfo"] as? [String: Any],
+              let used = (info["usedStorageInBytes"] as? NSNumber)?.int64Value else { return nil }
+        let total = (info["totalStorageInBytes"] as? NSNumber)?.int64Value
+        return StorageUsage(usedBytes: used, totalBytes: total, objects: nil, updated: now, accountWide: true)
+    }
     // Decodes `rclone size --json` ({"count":N,"bytes":N}) and `rclone about --json` ({"total","used","free"}).
     static func fromSize(_ data: Data, now: Date = Date()) -> StorageUsage? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -240,7 +255,7 @@ struct Storage: Codable, Identifiable, Hashable {
 
 extension Storage {
     /// Returns a copy with edited details. Identity, ports, caches and credentials stay the same.
-    func updating(title newTitle: String, root newRoot: String, readOnly: Bool, autoMount: Bool, mode: AccessMode, tags newTags: [String]? = nil, note newNote: String? = nil, existing: [Storage]) throws -> Storage {
+    func updating(title newTitle: String, root newRoot: String, readOnly: Bool, autoMount: Bool, mode: AccessMode, tags newTags: [String]? = nil, note newNote: String? = nil, keepFolder: Bool = false, existing: [Storage]) throws -> Storage {
         let label = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !label.isEmpty, label.count <= 80, !label.contains("/"), !label.contains(":"), !label.contains(where: { $0.isNewline }) else { throw StorageError.invalidName }
         guard !newRoot.contains(where: { $0.isNewline }), !newRoot.split(separator: "/").contains("..") else { throw StorageError.invalidRoot }
@@ -255,7 +270,7 @@ extension Storage {
         if let newTags { copy.tags = newTags }
         if let newNote { copy.note = String(newNote.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200)).replacingOccurrences(of: "\n", with: " ") }
         // The two built-in accounts keep their fixed Finder folder names.
-        if !Storage.legacy.contains(where: { $0.id == id }) { copy.directory = label + " · " + String(id.prefix(8)) }
+        if !keepFolder, !Storage.legacy.contains(where: { $0.id == id }) { copy.directory = label + " · " + String(id.prefix(8)) }
         if copy.directory != directory, existing.contains(where: { $0.id != id && $0.directory == copy.directory }) { throw StorageError.invalidName }
         return copy
     }

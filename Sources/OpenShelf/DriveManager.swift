@@ -373,8 +373,50 @@ final class DriveManager: ObservableObject {
         guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return AccountIdentity.googleAbout(data)
     }
+    // Apple has no public quota API; this uses the signed-in web session rclone already stores, read in memory only.
+    private func refreshICloudUsage(_ storage: Storage, binary: URL) {
+        usageRefreshing.insert(storage.id)
+        lastUsageAttempt[storage.id] = Date()
+        forceUsage.remove(storage.id)
+        let arguments = ["config", "dump"] + storage.configArguments(home: home)
+        Task { [weak self] in
+            let result = try? await runCommand(binary, arguments, timeoutSeconds: 30)
+            var fetched: StorageUsage?
+            if let result, result.code == 0,
+               let all = try? JSONSerialization.jsonObject(with: result.output) as? [String: [String: String]],
+               let cookies = all[storage.remote]?["cookies"] { fetched = await Self.iCloudUsage(cookies: cookies) }
+            guard let self else { return }
+            self.usageRefreshing.remove(storage.id)
+            self.usage[storage.id] = fetched ?? .unreported(previous: self.usage[storage.id])
+            self.usageStore.save(self.usage)
+        }
+    }
+    private static func iCloudUsage(cookies: String) async -> StorageUsage? {
+        func request(_ url: URL, post: Bool) -> URLRequest {
+            var r = URLRequest(url: url, timeoutInterval: 20)
+            r.httpShouldHandleCookies = false
+            r.setValue(cookies, forHTTPHeaderField: "Cookie")
+            r.setValue("https://www.icloud.com", forHTTPHeaderField: "Origin")
+            r.setValue("https://www.icloud.com/", forHTTPHeaderField: "Referer")
+            r.setValue("text/plain;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+            if post { r.httpMethod = "POST"; r.httpBody = Data("null".utf8) }
+            return r
+        }
+        guard let validate = URL(string: "https://setup.icloud.com/setup/ws/1/validate"),
+              let (data, response) = try? await URLSession.shared.data(for: request(validate, post: true)),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dsid = (object["dsInfo"] as? [String: Any])?["dsid"] as? String,
+              let base = ((object["webservices"] as? [String: Any])?["account"] as? [String: Any])?["url"] as? String,
+              let url = URL(string: base + "/setup/ws/1/storageUsageInfo?dsid=" + dsid),
+              url.scheme == "https", url.host?.hasSuffix(".icloud.com") == true,
+              let (body, reply) = try? await URLSession.shared.data(for: request(url, post: false)),
+              (reply as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return StorageUsage.fromICloud(body)
+    }
     func refreshUsage(_ storage: Storage) {
         guard !Self.isPreview, !usageRefreshing.contains(storage.id), let binary = rclone else { return }
+        if storage.provider == .iCloud { refreshICloudUsage(storage, binary: binary); return }
         guard storage.provider.reportsQuota else {
             usage[storage.id] = .unreported(previous: usage[storage.id])
             usageStore.save(usage)

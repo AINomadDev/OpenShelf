@@ -207,3 +207,11 @@ precondition(AccountIdentity.from(provider: .cloudflareR2, config: ["endpoint": 
 var measuredUsage = StorageUsage.unreported(); measuredUsage.usedBytes = 42; measuredUsage.measured = true
 precondition(StorageUsage.unreported(previous: measuredUsage).usedBytes == 42 && StorageUsage.unreported().usedBytes == 0)
 print("PASS: tags/notes, account identity parsing, Google account quota, measured sizes")
+
+let apple = StorageUsage.fromICloud(Data(#"{"storageUsageInfo":{"usedStorageInBytes":196901689385,"totalStorageInBytes":2199023255552}}"#.utf8))
+precondition(apple?.usedBytes == 196901689385 && apple?.totalBytes == 2199023255552 && apple?.accountWide == true)
+precondition(Storage.iCloud.quota(for: apple)?.level == .ok && StorageUsage.fromICloud(Data("{}".utf8)) == nil)
+precondition(Provider.iCloud.accountName == "iCloud")
+let renamed = try tagged.updating(title: "New name", root: tagged.root, readOnly: false, autoMount: true, mode: .archive, keepFolder: true, existing: [tagged])
+precondition(renamed.title == "New name" && renamed.directory == tagged.directory && renamed.mountPoint(home: home) == tagged.mountPoint(home: home))
+print("PASS: iCloud account usage parsing and renaming a mounted space")

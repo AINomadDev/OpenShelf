@@ -70,8 +70,8 @@ enum UsageText {
     static func unreported(_ usage: StorageUsage?) -> String {
         usage?.measured == true ? bytes(usage?.usedBytes ?? 0) + " stored · measured" : "Quota not reported"
     }
-    static func summary(_ quota: QuotaStatus, freeTier: Bool, accountWide: Bool = false) -> String {
-        let suffix = accountWide ? " · whole Google account" : ""
+    static func summary(_ quota: QuotaStatus, freeTier: Bool, accountName: String? = nil) -> String {
+        let suffix = accountName.map { " · whole \($0) account" } ?? ""
         return base(quota, freeTier: freeTier) + suffix
     }
     private static func base(_ quota: QuotaStatus, freeTier: Bool) -> String {

@@ -184,7 +184,7 @@ struct Dashboard: View {
                             if storage.isArchive { Text("ARCHIVE").font(.system(size: 8, weight: .bold)).tracking(0.8).padding(.horizontal, 5).padding(.vertical, 2).background(ShelfTheme.accent.opacity(0.5), in: Capsule()) }
                             Spacer()
                             if manager.usageRefreshing.contains(storage.id) { ProgressView().controlSize(.mini) }
-                            else if let quota { Text(UsageText.summary(quota, freeTier: storage.provider.freeTierBytes != nil && value?.totalBytes == nil, accountWide: value?.accountWide == true)).font(.system(size: 11)).foregroundStyle(quota.level == .exceeded ? Color.red : ShelfTheme.muted) }
+                            else if let quota { Text(UsageText.summary(quota, freeTier: storage.provider.freeTierBytes != nil && value?.totalBytes == nil, accountName: value?.accountWide == true ? storage.provider.accountName : nil)).font(.system(size: 11)).foregroundStyle(quota.level == .exceeded ? Color.red : ShelfTheme.muted) }
                             else if value?.isReported == false { Text(UsageText.unreported(value)).font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).help("This provider does not expose storage totals for this space (iCloud Drive and Google Shared Drives).") }
                             else { Text("Measuring…").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted) }
                         }
@@ -358,7 +358,7 @@ struct StorageCard: View {
             VStack(alignment: .leading, spacing: 7) {
                 VStack(alignment: .leading, spacing: 5) {
                     if let quota = storage.quota(for: manager.usage[storage.id]) {
-                        Text(UsageText.summary(quota, freeTier: storage.provider.freeTierBytes != nil && manager.usage[storage.id]?.totalBytes == nil, accountWide: manager.usage[storage.id]?.accountWide == true))
+                        Text(UsageText.summary(quota, freeTier: storage.provider.freeTierBytes != nil && manager.usage[storage.id]?.totalBytes == nil, accountName: manager.usage[storage.id]?.accountWide == true ? storage.provider.accountName : nil))
                             .font(.system(size: 11, weight: .medium)).foregroundStyle(quota.level == .exceeded ? Color.red : ShelfTheme.ink)
                         if quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
                     } else {
