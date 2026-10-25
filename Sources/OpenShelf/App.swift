@@ -321,19 +321,26 @@ struct StorageCard: View {
             .overlay(RoundedRectangle(cornerRadius: 19).stroke(ink.opacity(0.075)))
     }
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ProviderBadge(provider: storage.provider, size: 42)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(storage.title).font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.3).lineLimit(1)
-                Text(subtitle).font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).lineLimit(1).truncationMode(.middle).help(subtitle)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                ProviderBadge(provider: storage.provider, size: 42)
+                Text(storage.title).font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.3)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 42, alignment: .leading).help(storage.title)
+                actionMenu
             }
-            Spacer(minLength: 4)
-            HStack(spacing: 5) {
-                Circle().fill(isMounted ? Color.green : ShelfTheme.muted.opacity(0.5)).frame(width: 6, height: 6)
-                Text(statusText)
-            }.font(.system(size: 10, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 5)
-                .background(isMounted ? Color.green.opacity(0.09) : paper, in: Capsule())
-            actionMenu
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(storage.provider.title + (storage.provider.platformName.map { " · " + $0 } ?? "")).font(.system(size: 11, weight: .medium)).foregroundStyle(ink.opacity(0.8)).lineLimit(1)
+                    Text(storage.root.isEmpty ? "Account root" : storage.root).font(.system(size: 10, design: .monospaced)).foregroundStyle(ShelfTheme.muted)
+                        .lineLimit(1).truncationMode(.middle).help(storage.root)
+                }
+                Spacer(minLength: 4)
+                HStack(spacing: 5) {
+                    Circle().fill(isMounted ? Color.green : ShelfTheme.muted.opacity(0.5)).frame(width: 6, height: 6)
+                    Text(statusText)
+                }.font(.system(size: 10, weight: .medium)).fixedSize().padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(isMounted ? Color.green.opacity(0.09) : paper, in: Capsule())
+            }
         }
     }
     private var actionMenu: some View {
@@ -373,15 +380,20 @@ struct StorageCard: View {
     }
     private var modeRow: some View {
         HStack(spacing: 6) {
-            chip(storage.isArchive ? "archivebox" : "bolt", storage.isArchive ? (storage.provider.chargesEgress ? "Archive · downloads cost" : "Archive · no egress") : "Live")
+            chip(storage.isArchive ? "archivebox" : "bolt", storage.isArchive ? "Archive" : "Live", tint: storage.isArchive && storage.provider.chargesEgress ? .orange : nil)
             chip(storage.readOnly ? "lock" : "pencil", storage.readOnly ? "Read-only" : "Read & write")
             Spacer(minLength: 4)
-            Toggle("Auto-mount", isOn: Binding(get: { storage.autoMount }, set: { manager.setAutoMount(storage, enabled: $0) })).toggleStyle(.switch).controlSize(.mini).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+            Toggle("Auto-mount", isOn: Binding(get: { storage.autoMount }, set: { manager.setAutoMount(storage, enabled: $0) })).toggleStyle(.switch).controlSize(.mini)
+                .font(.system(size: 10)).foregroundStyle(ShelfTheme.muted).fixedSize()
         }
     }
-    private func chip(_ symbol: String, _ text: String) -> some View {
-        Label(text, systemImage: symbol).font(.system(size: 10, weight: .medium)).lineLimit(1).foregroundStyle(ShelfTheme.muted)
-            .padding(.horizontal, 8).padding(.vertical, 4).background(paper, in: Capsule())
+    private func chip(_ symbol: String, _ text: String, tint: Color? = nil) -> some View {
+        Label(text, systemImage: symbol).font(.system(size: 10, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(tint ?? ShelfTheme.muted)
+            .padding(.horizontal, 8).padding(.vertical, 4).background((tint ?? ShelfTheme.muted).opacity(0.1), in: Capsule())
+    }
+    private func archiveCaption(_ caption: String?) -> String {
+        guard storage.isArchive else { return caption ?? " " }
+        return (caption.map { $0 + " · " } ?? "") + (storage.provider.chargesEgress ? "downloads may cost money" : "no egress fees")
     }
     private var usageBlock: some View {
         let value = manager.usage[storage.id]
@@ -395,7 +407,7 @@ struct StorageCard: View {
                     if let remaining = parts.remaining { Text(remaining).font(.system(size: 12, weight: .semibold)).foregroundStyle(quota.level == .warning ? Color.orange : ink) }
                 }
                 if quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
-                Text(parts.warning ?? parts.caption ?? " ").font(.system(size: 10)).foregroundStyle(parts.warning != nil ? Color.red : ShelfTheme.muted).lineLimit(2)
+                Text(parts.warning ?? archiveCaption(parts.caption)).font(.system(size: 10)).foregroundStyle(parts.warning != nil ? Color.red : ShelfTheme.muted).lineLimit(2)
             } else {
                 let unreported = value?.isReported == false
                 Text(unreported ? (value?.measured == true ? UsageText.bytes(value?.usedBytes ?? 0) : "—") : "…").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(unreported && value?.measured != true ? ShelfTheme.muted : ink)

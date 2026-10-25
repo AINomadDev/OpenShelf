@@ -57,6 +57,18 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
     // Free allowance advertised by pay-as-you-go archive providers; nil when there is no fixed allowance.
     // iCloud Drive exposes no storage-info call; Google Shared Drives report none either (detected at refresh time).
     var reportsQuota: Bool { self != .iCloud }
+    // The cloud platform behind a service, shown beside its name.
+    var platformName: String? {
+        switch self {
+        case .gcs: return "GCP"
+        case .s3: return "AWS"
+        case .azureBlob: return "Azure"
+        case .cloudflareR2: return "Cloudflare"
+        case .backblazeB2: return "Backblaze"
+        case .idriveE2: return "IDrive"
+        default: return nil
+        }
+    }
     var accountName: String? {
         switch self {
         case .googleDrive: return "Google"
