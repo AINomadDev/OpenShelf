@@ -25,7 +25,7 @@ Choose **Add storage** on the dashboard:
 - **Cloudflare R2:** enter bucket/prefix, your Cloudflare account ID (the endpoint is derived), and an R2 API token's access key pair.
 - **Backblaze B2:** enter bucket/prefix and a bucket-scoped application key ID and key (native B2 API).
 - **IDrive e2:** enter bucket/prefix, the HTTPS endpoint for your bucket's region, and an access key pair.
-- **Create an R2 bucket:** in Add storage → Cloudflare R2, open *No bucket yet? Create one here*, enter a name and a token with Workers R2 Storage: Edit. The token is used once and never saved.
+- **Create an R2 bucket:** in Add storage → Cloudflare R2, open *No bucket yet? Create one here*, enter a name. OpenShelf first tries the token already saved for that Cloudflare account; if it is read-only it asks for a token with Workers R2 Storage: Edit, which is used once and never saved.
 - **Hetzner Object Storage / Storj:** enter the bucket, the endpoint (`https://<location>.your-objectstorage.com`, or `https://gateway.storjshare.io`) and an S3 access key pair. Hetzner includes 1 TB of traffic; Storj bills downloads per GB, so it is treated as an archive.
 - **Wasabi / DigitalOcean Spaces:** enter bucket, the region's HTTPS endpoint and an access key pair. Wasabi bills a 1 TB minimum with 90-day minimum retention; Spaces bundles 1 TB of transfer into its base plan.
 - **Guided setup:** the Add storage flow shows numbered steps for each provider with an *Open console* button, and accepts a pasted R2 endpoint URL or an e2 host without `https://`.

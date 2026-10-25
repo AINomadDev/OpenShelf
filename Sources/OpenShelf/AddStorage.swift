@@ -201,22 +201,29 @@ final class ConnectionDraft: ObservableObject {
         message = nil
     }
     /// Saves edited details. New credentials are written first and validated; the previous config is restored if the check fails.
+    /// Uses a token typed here if there is one, otherwise the token already saved for this Cloudflare account. Asks for a new token only when neither has access.
     func createR2Bucket() {
         let name = (fields["new_bucket"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let token = (fields["create_token"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = (fields["create_token"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         bucketOK = false
         guard let account = EndpointInput.r2AccountID(fields["account_id"] ?? "") else { bucketStatus = "Enter your Cloudflare account ID above first."; return }
         guard R2Buckets.isValidName(name) else { bucketStatus = "Bucket names are 3-63 characters: lowercase letters, digits and hyphens."; return }
-        guard !token.isEmpty, !token.contains("\n"), token.count < 400, let request = R2Buckets.request(token: token, account: account, bucket: name) else { bucketStatus = "Paste a Cloudflare API token first."; return }
+        let saved = (try? String(contentsOf: Storage.accountTokenURL(home: home, account: account), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let usingSaved = typed.isEmpty
+        let token = usingSaved ? saved : typed
+        guard !token.isEmpty else { bucketStatus = "No saved token for this Cloudflare account. Paste a token with Workers R2 Storage: Edit."; return }
+        guard !token.contains("\n"), token.count < 400, let request = R2Buckets.request(token: token, account: account, bucket: name) else { bucketStatus = "That does not look like a Cloudflare API token."; return }
         creatingBucket = true; bucketStatus = nil
         Task { @MainActor in
             let result = try? await URLSession.shared.data(for: request)
             let status = (result?.1 as? HTTPURLResponse)?.statusCode
             if let problem = R2Buckets.failureReason(status: status, data: result?.0) {
-                bucketStatus = problem
+                bucketStatus = usingSaved && (status == 401 || status == 403)
+                    ? "The token already saved for this account cannot create buckets. Paste a token with Account → Workers R2 Storage → Edit below; it is used once and not saved."
+                    : problem
             } else {
                 bucketOK = true
-                bucketStatus = "Bucket \(name) is ready. Create an R2 access key for it and paste the keys above."
+                bucketStatus = "Bucket \(name) is ready" + (usingSaved ? " (created with your saved token)." : ".") + " Create an R2 access key for it and paste the keys above."
                 root = name; fields["create_token"] = ""
             }
             creatingBucket = false
@@ -589,8 +596,8 @@ struct ProviderFields: View {
             DisclosureGroup("No bucket yet? Create one here") {
                 VStack(alignment: .leading, spacing: 8) {
                     inputField("New bucket name", text: draft.value("new_bucket"), prompt: "media-archive")
-                    secretField("Cloudflare API token (Workers R2 Storage: Edit)", text: draft.value("create_token"))
-                    Text("Used once to create the bucket and never saved. It is different from the read-only analytics token.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    secretField("Other token, only if needed (Workers R2 Storage: Edit)", text: draft.value("create_token"))
+                    Text("Leave empty to use the token already saved for this Cloudflare account. If that one is read-only, paste a token that can edit R2 here; it is used once and never saved.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Button(draft.creatingBucket ? "Creating…" : "Create bucket") { draft.createR2Bucket() }
                         .buttonStyle(ShelfButtonStyle(prominent: false)).disabled(draft.creatingBucket)
                     if let status = draft.bucketStatus {
