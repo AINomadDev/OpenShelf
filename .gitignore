@@ -6,3 +6,6 @@ __pycache__/
 .codegraph/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+# Local scratch: plans, todo lists, temporary artifacts
+.local/
