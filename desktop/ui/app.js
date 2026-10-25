@@ -19,6 +19,7 @@ async function render() {
     row.append(v.running ? btn('Open', () => call('open_folder', { id: s.id }), true) : el('span'),
       v.running ? btn('Disconnect', () => call('stop_space', { id: s.id })) : btn('Connect', () => call('start_space', { id: s.id })),
       btn('Refresh usage', async () => { await call('refresh_usage', { id: s.id, force: true }); }, true));
+    if (!v.running) row.append(btn('Clean junk files', () => call('clean_junk', { id: s.id }), true));
     if (!v.running) row.append(btn('Remove', () => call('remove_space', { id: s.id }), true));
     card.append(row);
     if (v.quota) {

@@ -261,6 +261,22 @@ final class DriveManager: ObservableObject {
             if !fresh && !recentlyTried && usageRefreshing.isEmpty { refreshUsage(storage); return }
         }
     }
+    func cleanJunk(_ storage: Storage) {
+        guard !Self.isPreview, !busy.contains(storage), let binary = rclone else { return }
+        busy.insert(storage)
+        Task { [weak self] in
+            let result = try? await runCommand(binary, storage.junkCleanupArguments(home: home), timeoutSeconds: 1800)
+            guard let self else { return }
+            self.busy.remove(storage)
+            if result?.code == 0 {
+                self.notice = "Removed ._* and .DS_Store files from \(storage.title)."
+                self.forceUsage.insert(storage.id)
+                self.refreshUsage(storage)
+            } else {
+                self.notice = "Could not clean junk files. Check your connection and credentials, then try again."
+            }
+        }
+    }
     func refreshUsage(_ storage: Storage) {
         guard !Self.isPreview, !usageRefreshing.contains(storage.id), let binary = rclone else { return }
         usageRefreshing.insert(storage.id)

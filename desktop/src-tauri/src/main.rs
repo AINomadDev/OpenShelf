@@ -86,6 +86,15 @@ async fn refresh_usage(id: String, force: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn clean_junk(id: String) -> Result<(), String> {
+    let p = Paths::system();
+    let space = find_space(&p, &id)?;
+    if mount::is_running(&p, &space) { return Err("Disconnect this space before cleaning junk files.".into()); }
+    let out = Command::new(mount::rclone_path()).args(mount::junk_cleanup_args(&space, &p)).stdin(Stdio::null()).output().map_err(|_| "rclone was not found.".to_string())?;
+    if out.status.success() { Ok(()) } else { Err("Could not clean junk files. Check your connection and credentials.".into()) }
+}
+
+#[tauri::command]
 async fn open_url(url: String) -> Result<(), String> {
     let allowed = providers::PROVIDERS.iter().any(|p| !p.console_url.is_empty() && p.console_url == url);
     if !allowed { return Err("That link is not allowed.".into()); }
@@ -114,7 +123,7 @@ async fn open_folder(id: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![catalogue, list_spaces, add_space, start_space, stop_space, remove_space, transfers, refresh_usage, open_url, open_folder])
+        .invoke_handler(tauri::generate_handler![catalogue, list_spaces, add_space, start_space, stop_space, remove_space, transfers, refresh_usage, clean_junk, open_url, open_folder])
         .run(tauri::generate_context!())
         .expect("failed to run OpenShelf");
 }

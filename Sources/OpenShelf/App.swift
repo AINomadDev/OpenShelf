@@ -321,6 +321,9 @@ struct StorageCard: View {
                     if storage.provider.prefersArchive {
                         Button(storage.isArchive ? "Switch to live mode" : "Switch to archive mode") { manager.setMode(storage, storage.isArchive ? .live : .archive) }
                     }
+                    if storage.provider.isObjectStorage {
+                        Button("Clean junk files (._*, .DS_Store)") { manager.cleanJunk(storage) }.disabled(isMounted || manager.isRunning(storage) || isBusy)
+                    }
                     Divider()
                     Button("Remove space…", role: .destructive) { manager.spaceToRemove = storage }.disabled(isMounted || manager.isRunning(storage) || isBusy)
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().help("Space actions")

@@ -194,6 +194,10 @@ struct Storage: Codable, Identifiable, Hashable {
     // Explicit directory hints avoid Foundation probing a potentially stalled NFS mount.
     func mountPoint(home: URL) -> URL { (FileManager.default.fileExists(atPath: home.appendingPathComponent("CloudShelf").path) ? home.appendingPathComponent("CloudShelf", isDirectory: true) : home.appendingPathComponent("OpenShelf", isDirectory: true)).appendingPathComponent(directory, isDirectory: true) }
     func cache(home: URL) -> URL { Self.folder(home, "Library/Caches").appendingPathComponent(cacheKey) }
+    /// Deletes macOS metadata clutter (._* and .DS_Store); mounts cannot filter these at write time.
+    func junkCleanupArguments(home: URL) -> [String] {
+        ["delete", remotePath, "--include", "._*", "--include", ".DS_Store"] + configArguments(home: home)
+    }
     func arguments(home: URL) -> [String] {
         ["nfsmount", remotePath, mountPoint(home: home).path,
          "--addr", "127.0.0.1:0", "--option", "nolocks", "--option", "noappledouble",

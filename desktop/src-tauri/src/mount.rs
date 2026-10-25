@@ -34,6 +34,12 @@ pub fn rclone_path() -> PathBuf {
 
 pub fn remote_name(space: &Space) -> String { format!("openshelf-{}", space.id) }
 
+/// Deletes macOS metadata clutter; mounts cannot filter these at write time.
+pub fn junk_cleanup_args(space: &Space, paths: &Paths) -> Vec<String> {
+    ["delete".to_string(), remote_path(space), "--include".into(), "._*".into(), "--include".into(), ".DS_Store".into(),
+     "--config".into(), paths.conf(&space.id).to_string_lossy().into()].to_vec()
+}
+
 pub fn remote_path(space: &Space) -> String { format!("{}:{}", remote_name(space), space.root) }
 
 /// Archive mode keeps downloaded files cached longer and caches directory listings, so repeat access is not re-billed.
@@ -144,6 +150,11 @@ mod tests {
         let a = mount_args(&space(true, true), &paths());
         assert!(a.contains(&"--read-only".to_string()) && a.contains(&"127.0.0.1:55740".to_string()));
         assert!(!a.iter().any(|x| x.contains("openshelf") && x.contains("pass")));
+    }
+    #[test]
+    fn junk_cleanup_only_targets_metadata() {
+        let a = junk_cleanup_args(&space(true, false), &paths());
+        assert!(a[0] == "delete" && a.contains(&"._*".to_string()) && a.contains(&".DS_Store".to_string()));
     }
     #[test]
     fn unmount_guard() {

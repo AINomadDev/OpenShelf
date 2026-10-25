@@ -157,3 +157,6 @@ precondition(EndpointInput.r2AccountID("https://abc123def.r2.cloudflarestorage.c
 precondition(EndpointInput.r2AccountID("bad id!") == nil)
 precondition(EndpointInput.https("s3.example.com") == "https://s3.example.com" && EndpointInput.https(" https://x.y ") == "https://x.y")
 print("PASS: guided setup content and endpoint normalisation")
+
+let junk = try Storage.make(provider: .cloudflareR2, title: "Junk", root: "bucket", existing: [], readOnly: false, autoMount: false).junkCleanupArguments(home: home)
+precondition(junk.first == "delete" && junk.contains("._*") && junk.contains(".DS_Store") && !junk.contains("--rmdirs"))
