@@ -69,6 +69,17 @@ async fn update_space(id: String, title: String, root: String, read_only: bool, 
     Ok(())
 }
 
+/// Labels are display-only, so they can change while a space is connected.
+#[tauri::command]
+async fn set_labels(id: String, tags: String, note: String) -> Result<(), String> {
+    let paths = Paths::system();
+    let mut spaces = store::load_spaces(&paths)?;
+    let space = spaces.iter_mut().find(|s| s.id == id).ok_or("Space not found.")?;
+    space.tags = store::parse_tags(&tags);
+    space.note = note.trim().chars().take(200).collect();
+    store::save_spaces(&paths, &spaces)
+}
+
 #[tauri::command]
 async fn start_space(id: String) -> Result<(), String> { let p = Paths::system(); mount::start(&p, &find_space(&p, &id)?) }
 
@@ -147,7 +158,7 @@ async fn open_folder(id: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![catalogue, list_spaces, add_space, update_space, start_space, stop_space, remove_space, transfers, refresh_usage, clean_junk, open_url, open_folder])
+        .invoke_handler(tauri::generate_handler![catalogue, list_spaces, add_space, update_space, set_labels, start_space, stop_space, remove_space, transfers, refresh_usage, clean_junk, open_url, open_folder])
         .run(tauri::generate_context!())
         .expect("failed to run OpenShelf");
 }

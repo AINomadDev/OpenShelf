@@ -121,6 +121,7 @@ Core checks cover preserved legacy paths, multiple accounts of the same provider
 - **Archive folder / Verify archive:** the card menu of an object-storage space can copy a local folder straight to the space (copy only, never deletes; junk, `node_modules` and `.git/objects` are skipped) and compare it afterwards by checksum. These run while the app is open, unlike mounts; re-running resumes by skipping files already uploaded.
 - **Credential health:** Azure SAS tokens are checked for their `se=` expiry and flagged in the usage panel within 14 days.
 - **Menu bar:** shows estimated cost, active uploads and spaces near their allowance.
+- **Pages and sidebar:** *Activity* and *Costs & budgets* open as full pages. Activity shows live uploads, queue, errors and cache per space, running archive/verify tasks, and a saved history of recent messages (`events.json`, newest first, cleared on demand). Costs shows stored size, estimated cost, restore cost, growth and a trend line per priced space, with inline budgets. Sidebar quick views filter to mounted spaces, archive spaces and spaces that *need attention* (upload errors, full cache, near or over an allowance or budget, expiring credentials).
 - Releases: pushing a `v*` tag builds unsigned macOS, Windows and Linux artifacts (`.github/workflows/release.yml`).
 
 Run `./run.sh` (macOS/Linux) or `run.cmd` (Windows) to start the right app for your OS.
@@ -134,5 +135,7 @@ Requirements: [rclone](https://rclone.org/install/) on PATH (or next to the app)
 ```sh
 cd desktop/src-tauri && cargo test && cargo run
 ```
+
+The desktop app also supports tags and notes (editable while connected), cost estimates and Wasabi / DigitalOcean Spaces.
 
 Status: unit tests run in CI on Linux, Windows and macOS. Mounting has only been exercised on macOS so far, so treat Windows/Linux as untested preview. Google Drive and iCloud (interactive sign-in) are macOS-only for now.

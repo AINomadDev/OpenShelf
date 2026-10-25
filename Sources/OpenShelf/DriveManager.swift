@@ -32,7 +32,9 @@ func runCommand(_ executable: URL, _ arguments: [String], environment: [String: 
 final class DriveManager: ObservableObject {
     @Published var connections: [Storage] = []
     @Published var showingAddStorage = false
-    @Published var showingActivity = false
+    @Published var page: DashboardPage = .spaces
+    @Published var quickFilter: QuickFilter = .all
+    @Published var events: [ActivityEvent] = []
     @Published var searchText = ""
     @Published var providerFilter: Provider?
     @Published var mountedOnly = false
@@ -40,10 +42,13 @@ final class DriveManager: ObservableObject {
         connections.filter { storage in
             (providerFilter == nil || storage.provider == providerFilter)
                 && (!mountedOnly || mounted.contains(storage))
+                && (quickFilter != .mounted || mounted.contains(storage))
+                && (quickFilter != .archive || storage.isArchive)
+                && (quickFilter != .attention || !attention(storage).isEmpty)
                 && (searchText.isEmpty || ([storage.title, storage.provider.title, storage.root, storage.note, identities[storage.id]?.email ?? "", identities[storage.id]?.name ?? "", identities[storage.id]?.detail ?? ""] + storage.tags).contains { $0.localizedCaseInsensitiveContains(searchText) })
         }
     }
-    func showAllSpaces() { searchText = ""; providerFilter = nil; mountedOnly = false }
+    func showAllSpaces() { searchText = ""; providerFilter = nil; mountedOnly = false; quickFilter = .all; page = .spaces }
     func copyPath(_ storage: Storage) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(storage.mountPoint(home: home).path, forType: .string)
@@ -56,6 +61,32 @@ final class DriveManager: ObservableObject {
     private var identityStore: IdentityStore { IdentityStore(home: home) }
     private var budgetStore: BudgetStore { BudgetStore(home: home) }
     private var historyStore: HistoryStore { HistoryStore(home: home) }
+    private var eventStore: EventStore { EventStore(home: home) }
+    func logEvent(_ message: String) {
+        events = ActivityLog.append(message, at: Date(), to: events)
+        if !Self.isPreview { eventStore.save(events) }
+    }
+    func clearEvents() { events = []; if !Self.isPreview { eventStore.save([]) } }
+    /// Reasons a space needs a look: transfer errors, a full cache, allowance or budget limits, or an expiring credential.
+    func attention(_ storage: Storage) -> [String] {
+        var reasons: [String] = []
+        if let stats = activity[storage] {
+            if stats.diskCache.erroredFiles > 0 { reasons.append("\(stats.diskCache.erroredFiles) file(s) failed to upload") }
+            if stats.diskCache.outOfSpace { reasons.append("Local cache is out of space") }
+        }
+        if let level = storage.quota(for: usage[storage.id])?.level {
+            if level == .exceeded { reasons.append("Over its allowance") } else if level == .warning { reasons.append("Near its allowance") }
+        }
+        switch budgetLevel(storage) {
+        case .exceeded: reasons.append("Over monthly budget")
+        case .nearing: reasons.append("Near monthly budget")
+        default: break
+        }
+        if let warning = credentialWarning(storage) { reasons.append(warning) }
+        return reasons
+    }
+    var attentionCount: Int { connections.filter { !attention($0).isEmpty }.count }
+    var activeTransfers: Int { activity.values.reduce(0) { $0 + $1.diskCache.uploadsInProgress + $1.diskCache.uploadsQueued } }
     init() {
         if Self.isPreview { loadPreviewData(); return }
         LegacyMigration.run(home: home)
@@ -65,6 +96,7 @@ final class DriveManager: ObservableObject {
         identities = identityStore.load()
         budgets = budgetStore.load()
         history = historyStore.load()
+        events = eventStore.load()
     }
     private func recordHistory() {
         guard !Self.isPreview else { return }
@@ -181,7 +213,7 @@ final class DriveManager: ObservableObject {
     @Published var usageRefreshing: Set<String> = []
     @Published var refreshing = false
     @Published var showingGuide = false
-    @Published var notice: String?
+    @Published var notice: String? { didSet { if let notice { logEvent(notice) } } }
     @Published var diskSpace = DiskSpace(freeBytes: nil)
     @Published var loginStatus = "Checking login startup…"
     private var forceUsage: Set<String> = []

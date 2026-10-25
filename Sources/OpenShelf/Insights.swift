@@ -152,3 +152,45 @@ enum CredentialHealth {
         return days <= 14 ? "The access token for this space expires in \(max(days, 1)) day\(days <= 1 ? "" : "s")." : nil
     }
 }
+
+enum EventLevel: String, Codable { case info, warning, error }
+
+struct ActivityEvent: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var date: Date
+    var message: String
+    var level: EventLevel
+}
+
+/// A bounded, de-duplicated history of what OpenShelf told the user, so messages are not lost when an alert is dismissed.
+enum ActivityLog {
+    static let limit = 200
+    static func level(for message: String) -> EventLevel {
+        let text = message.lowercased()
+        if ["could not", "did not", "failed", "unable", "expired", "cannot"].contains(where: text.contains) { return .error }
+        if ["expires in", "over its", "near", "may cost", "read-only", "disconnect this"].contains(where: text.contains) { return .warning }
+        return .info
+    }
+    static func append(_ message: String, at date: Date, to events: [ActivityEvent]) -> [ActivityEvent] {
+        if let last = events.first, last.message == message, date.timeIntervalSince(last.date) < 5 { return events }
+        return Array(([ActivityEvent(date: date, message: message, level: level(for: message))] + events).prefix(limit))
+    }
+}
+
+struct EventStore {
+    let home: URL
+    var url: URL { Storage.support(home: home).appendingPathComponent("events.json") }
+    func load() -> [ActivityEvent] {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([ActivityEvent].self, from: Data(contentsOf: url))) ?? []
+    }
+    func save(_ items: [ActivityEvent]) {
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(items) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? data.write(to: url, options: .atomic)
+    }
+}
+
+enum DashboardPage: String, CaseIterable { case spaces, activity, costs }
+enum QuickFilter: String, CaseIterable { case all, mounted, archive, attention }

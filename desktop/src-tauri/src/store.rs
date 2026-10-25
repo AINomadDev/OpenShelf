@@ -12,6 +12,10 @@ pub struct Space {
     pub archive: bool,
     pub port: u16,
     pub mount_path: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub note: String,
 }
 
 pub struct Paths { pub base: PathBuf, pub mounts: PathBuf }
@@ -85,7 +89,19 @@ pub fn new_space(paths: &Paths, existing: &[Space], provider: &str, title: &str,
     let id = uuid::Uuid::new_v4().to_string();
     let port = (55733u16..65000).find(|p| !existing.iter().any(|s| s.port == *p)).ok_or("No free control port is available.")?;
     let mount_path = paths.mounts.join(format!("{title} - {}", &id[..8])).to_string_lossy().to_string();
-    Ok(Space { id, provider: provider.into(), title, root, read_only, archive, port, mount_path })
+    Ok(Space { id, provider: provider.into(), title, root, read_only, archive, port, mount_path, tags: vec![], note: String::new() })
+}
+
+/// Comma-separated text to at most 8 unique tags of up to 24 characters.
+pub fn parse_tags(text: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for part in text.split(|c| c == ',' || c == ';' || c == '\n') {
+        let tag: String = part.trim().chars().take(24).collect();
+        if !tag.is_empty() && seen.insert(tag.to_lowercase()) { out.push(tag); }
+        if out.len() == 8 { break; }
+    }
+    out
 }
 
 /// Applies edited details to one space. Identity, port and credentials are untouched; the mount folder follows the new name.
@@ -104,6 +120,13 @@ pub fn edit_space(paths: &Paths, spaces: &[Space], id: &str, title: &str, root: 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tags_are_trimmed_unique_and_capped() {
+        assert_eq!(super::parse_tags(" work, Work ;family\n,, "), vec!["work", "family"]);
+        assert_eq!(super::parse_tags(&"a,b,c,d,e,f,g,h,i,j".to_string()).len(), 8);
+        assert_eq!(super::parse_tags(&"x".repeat(40))[0].len(), 24);
+    }
+
     use super::*;
     fn paths() -> Paths { Paths { base: std::env::temp_dir().join(format!("os-{}", uuid::Uuid::new_v4())), mounts: PathBuf::from("/tmp/m") } }
     #[test]

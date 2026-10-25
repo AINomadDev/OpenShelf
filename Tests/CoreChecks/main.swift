@@ -265,3 +265,18 @@ let copyArgs = archiveSpace.archiveCopyArguments(source: URL(fileURLWithPath: "/
 precondition(copyArgs[0] == "copy" && copyArgs[1] == "/tmp/photos" && copyArgs[2].hasSuffix("bucket/2026") && copyArgs.contains("._*") && !copyArgs.contains("sync"))
 precondition(archiveSpace.verifyArguments(source: URL(fileURLWithPath: "/tmp/photos"), subfolder: "", home: home)[0] == "check")
 print("PASS: archive copy/verify arguments and credential expiry warnings")
+
+var events: [ActivityEvent] = []
+let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+events = ActivityLog.append("Could not clean junk files.", at: t0, to: events)
+events = ActivityLog.append("Could not clean junk files.", at: t0.addingTimeInterval(2), to: events)
+precondition(events.count == 1 && events[0].level == .error)
+events = ActivityLog.append("Verified: every file is safe.", at: t0.addingTimeInterval(60), to: events)
+precondition(events.count == 2 && events[0].level == .info && events[0].message.hasPrefix("Verified"))
+for i in 0..<300 { events = ActivityLog.append("m\(i)", at: t0.addingTimeInterval(Double(100 + i * 10)), to: events) }
+precondition(events.count == ActivityLog.limit && events[0].message == "m299")
+precondition(ActivityLog.level(for: "The access token for this space expires in 3 days.") == .warning)
+let eventHome = FileManager.default.temporaryDirectory.appendingPathComponent("os-events-\(UUID().uuidString)")
+EventStore(home: eventHome).save(events)
+precondition(EventStore(home: eventHome).load().count == ActivityLog.limit)
+print("PASS: activity log")

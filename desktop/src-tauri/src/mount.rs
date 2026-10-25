@@ -133,7 +133,7 @@ pub fn stop(paths: &Paths, space: &Space) -> Result<(), String> {
 mod tests {
     use super::*;
     fn space(archive: bool, read_only: bool) -> Space {
-        Space { id: "abc".into(), provider: "r2".into(), title: "T".into(), root: "bucket/p".into(), read_only, archive, port: 55740, mount_path: "/tmp/m".into() }
+        Space { id: "abc".into(), provider: "r2".into(), title: "T".into(), root: "bucket/p".into(), read_only, archive, port: 55740, mount_path: "/tmp/m".into(), tags: vec![], note: String::new() }
     }
     fn paths() -> Paths { Paths { base: PathBuf::from("/tmp/base"), mounts: PathBuf::from("/tmp/m") } }
     #[test]

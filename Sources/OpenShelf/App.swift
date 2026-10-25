@@ -74,6 +74,10 @@ struct Dashboard: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
+            switch manager.page {
+            case .activity: ActivityPage(manager: manager)
+            case .costs: CostsPage(manager: manager)
+            case .spaces:
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
@@ -147,11 +151,11 @@ struct Dashboard: View {
                     }.padding(.horizontal, 28).padding(.bottom, 28)
                 }
             }
+            }
         }.frame(minWidth: 1000, minHeight: 710).background(paper).foregroundStyle(ink).preferredColorScheme(.light)
         .sheet(isPresented: $manager.showingGuide) { setupGuide }
         .sheet(isPresented: $manager.showingAddStorage) { AddStorageView(manager: manager) }
         .sheet(item: $manager.spaceToEdit) { EditStorageView(manager: manager, storage: $0) }
-        .sheet(isPresented: $manager.showingActivity) { activityPanel }
         .confirmationDialog("Open this archive in Finder?", isPresented: Binding(get: { manager.archiveToOpen != nil }, set: { if !$0 { manager.archiveToOpen = nil } }), titleVisibility: .visible) {
             Button("Open in Finder") {
                 if let storage = manager.archiveToOpen { manager.open(storage) }
@@ -236,19 +240,23 @@ struct Dashboard: View {
         }.padding(18).frame(maxWidth: .infinity, alignment: .leading).background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 15))
     }
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 10) {
                 Image(systemName: "cloud.fill").font(.system(size: 21)).frame(width: 41, height: 41).background(accent, in: RoundedRectangle(cornerRadius: 13))
                 Text("openshelf").font(.system(size: 20, weight: .bold, design: .rounded)).tracking(-0.7)
             }.padding(.bottom, 10)
-            VStack(spacing: 7) {
-                Button { manager.showAllSpaces() } label: {
-                    HStack { Label("My spaces", systemImage: "square.grid.2x2.fill"); Spacer(); Text(String(manager.connections.count)).opacity(0.5) }
-                        .font(.system(size: 13, weight: .semibold)).padding(12).background(ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 11))
-                }.buttonStyle(.plain)
-                nav("Activity", symbol: "waveform.path") { manager.showingActivity = true }
+            VStack(spacing: 4) {
+                navItem("My spaces", symbol: "square.grid.2x2.fill", page: .spaces, badge: String(manager.connections.count))
+                navItem("Activity", symbol: "waveform.path", page: .activity, badge: manager.activeTransfers > 0 ? "\(manager.activeTransfers)" : nil)
+                navItem("Costs & budgets", symbol: "chart.line.uptrend.xyaxis", page: .costs, badge: nil)
                 nav("Getting started", symbol: "book.closed") { manager.showingGuide = true }
             }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("QUICK VIEWS").font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(ShelfTheme.muted)
+                quick("Mounted now", symbol: "externaldrive.badge.checkmark", filter: .mounted, count: manager.mounted.count)
+                quick("Archive spaces", symbol: "archivebox", filter: .archive, count: manager.connections.filter(\.isArchive).count)
+                quick("Needs attention", symbol: "exclamationmark.triangle", filter: .attention, count: manager.attentionCount, tint: manager.attentionCount > 0 ? .orange : nil)
+            }.padding(.horizontal, 8)
             VStack(alignment: .leading, spacing: 12) {
                 Text("YOUR ACCOUNTS").font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(ShelfTheme.muted)
                 ScrollView {
@@ -264,7 +272,7 @@ struct Dashboard: View {
                             }.buttonStyle(.plain)
                         }
                     }
-                }.frame(maxHeight: 210)
+                }.frame(maxHeight: 150)
             }.padding(.horizontal, 8)
             Spacer()
             VStack(alignment: .leading, spacing: 10) {
@@ -277,6 +285,22 @@ struct Dashboard: View {
             }.buttonStyle(.plain).foregroundStyle(ShelfTheme.muted)
         }.padding(20).frame(width: 200).frame(maxHeight: .infinity).background(Color.white.opacity(0.5))
             .overlay(alignment: .trailing) { Rectangle().fill(ink.opacity(0.07)).frame(width: 1) }
+    }
+    private func navItem(_ title: String, symbol: String, page: DashboardPage, badge: String?) -> some View {
+        let selected = manager.page == page && (page != .spaces || manager.quickFilter == .all)
+        return Button { if page == .spaces { manager.showAllSpaces() } else { manager.page = page } } label: {
+            HStack { Label(title, systemImage: symbol); Spacer(); if let badge { Text(badge).opacity(0.55) } }
+                .font(.system(size: 13, weight: selected ? .semibold : .regular)).padding(12)
+                .background(selected ? ink.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 11)).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+    private func quick(_ title: String, symbol: String, filter: QuickFilter, count: Int, tint: Color? = nil) -> some View {
+        let selected = manager.page == .spaces && manager.quickFilter == filter
+        return Button { manager.page = .spaces; manager.searchText = ""; manager.providerFilter = nil; manager.mountedOnly = false; manager.quickFilter = filter } label: {
+            HStack { Label(title, systemImage: symbol).foregroundStyle(tint ?? ink); Spacer(); Text(String(count)).foregroundStyle(ShelfTheme.muted) }
+                .font(.system(size: 12, weight: selected ? .semibold : .regular)).padding(.vertical, 6).padding(.horizontal, 8)
+                .background(selected ? ink.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 9)).contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
     private func nav(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Label(title, systemImage: symbol).font(.system(size: 13)).padding(12).frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.plain)
@@ -291,43 +315,12 @@ struct Dashboard: View {
             Spacer(minLength: 0)
         }.padding(15).frame(maxWidth: .infinity).background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 15))
     }
-    private var activityPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Live activity").font(.system(size: 25, weight: .semibold, design: .rounded))
-                    Text("Current transfer and cache status across your spaces.").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
-                }
-                Spacer()
-                Button("Done") { manager.showingActivity = false }.buttonStyle(ShelfButtonStyle())
-            }
-            ScrollView {
-                VStack(spacing: 12) {
-                    ForEach(manager.connections) { storage in
-                        ShelfSection(title: storage.title, subtitle: storage.provider.title) {
-                            if let stats = manager.activity[storage] {
-                                HStack {
-                                    Label("\(stats.diskCache.uploadsInProgress) uploading", systemImage: "arrow.up.circle")
-                                    Spacer()
-                                    Text("\(stats.diskCache.uploadsQueued) queued · \(stats.diskCache.erroredFiles) errors")
-                                }.font(.system(size: 12))
-                                Text(ByteCountFormatter.string(fromByteCount: stats.diskCache.bytesUsed, countStyle: .file) + " cached locally").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
-                            } else {
-                                Text(manager.mounted.contains(storage) ? "Waiting for transfer status…" : "Not mounted").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
-                            }
-                        }
-                    }
-                }
-            }
-            Text("Live status only. A mounted drive does not establish that every file is synced.").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted)
-        }.padding(28).frame(width: 650, height: 580).background(paper)
-    }
     private var setupGuide: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Bring your own storage.").font(.system(size: 28, weight: .semibold, design: .rounded))
             Text("1. Choose a provider, name your space, and review access and startup preferences.")
             Text("2. Sign in with Google in your browser, finish Apple sign-in in Terminal, or provide scoped object-storage credentials (S3, GCS, Azure, Cloudflare R2, Backblaze B2, IDrive e2).")
-            Text("3. Object storage defaults to Archive mode: copy files in, and open them only when needed to avoid download fees. Use Activity to check transfers before disconnecting.")
+            Text("3. Object storage defaults to Archive mode: copy files in, and open them only when needed to avoid download fees. Use the Activity page to check transfers before disconnecting.")
             Text("Google accounts can reuse saved app credentials. iCloud is experimental and needs periodic reauthentication. OpenShelf adds no encryption layer.").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
             HStack {
                 Button("Full setup guide") { if let url = Bundle.main.url(forResource: "README", withExtension: "md") { NSWorkspace.shared.open(url) } }.buttonStyle(ShelfButtonStyle())

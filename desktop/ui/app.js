@@ -24,6 +24,13 @@ async function render() {
     if (!v.running) row.append(btn('Clean junk files', () => call('clean_junk', { id: s.id }), true));
     if (!v.running) row.append(btn('Remove', () => call('remove_space', { id: s.id }), true));
     card.append(row);
+    if (s.tags && s.tags.length) { const t = el('div', undefined, 'row'); s.tags.forEach((x) => t.append(el('span', x, 'badge'))); card.append(t); }
+    if (s.note) card.append(el('div', s.note, 'muted'));
+    const labels = el('div', undefined, 'row'), tagsIn = el('input'), noteIn = el('input');
+    tagsIn.placeholder = 'Tags (comma separated)'; tagsIn.value = (s.tags || []).join(', ');
+    noteIn.placeholder = 'Note'; noteIn.value = s.note || '';
+    labels.append(tagsIn, noteIn, btn('Save labels', () => call('set_labels', { id: s.id, tags: tagsIn.value, note: noteIn.value }), true));
+    card.append(labels);
     if (v.quota) {
       const q = v.quota, bar = el('div', undefined, 'bar ' + q.level), fill = el('i');
       fill.style.width = Math.round((q.fraction ?? 0) * 100) + '%'; bar.append(fill);
@@ -75,5 +82,5 @@ $('form').addEventListener('submit', async (ev) => {
 (async () => {
   catalogue = await call('catalogue');
   $('prov').replaceChildren(...catalogue.map((p) => { const o = el('option', p.title); o.value = p.id; return o; }));
-  await render(); setInterval(render, 15000);
+  await render(); setInterval(() => { if (document.activeElement?.tagName !== 'INPUT') render(); }, 15000);
 })();
