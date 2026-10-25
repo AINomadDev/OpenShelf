@@ -194,3 +194,31 @@ struct EventStore {
 
 enum DashboardPage: String, CaseIterable { case spaces, activity, costs }
 enum QuickFilter: String, CaseIterable { case all, mounted, archive, attention }
+
+/// Tooltip wording that explains what the current usage level means for the bill (or, for fixed plans, for capacity).
+enum UsageHint {
+    static func text(provider: Provider, level: QuotaLevel, overageBytes: Int64 = 0) -> String? {
+        switch provider {
+        case .googleDrive, .iCloud:
+            let name = provider.title
+            switch level {
+            case .exceeded: return "Your \(name) plan is full. Nothing more can be stored until you free up space or buy a larger plan. There is no pay-as-you-go."
+            case .warning: return "\(name) has a fixed storage plan. When it fills up you cannot store more until you free space or upgrade."
+            default: return "\(name) has a fixed storage plan and a flat price. It never bills per GB; once full you must free space or buy more."
+            }
+        case .cloudflareR2, .backblazeB2, .idriveE2:
+            let free = ByteCountFormatter.string(fromByteCount: provider.freeTierBytes ?? 0, countStyle: .file)
+            switch level {
+            case .exceeded: return "Free tier used up. \(ByteCountFormatter.string(fromByteCount: overageBytes, countStyle: .file)) is above the \(free) allowance and billed pay-as-you-go (about \(rate(provider)) per GB per month). Storage keeps working; the bill grows with what you store."
+            case .warning: return "Nearly at the \(free) free tier. Beyond it, storage is billed pay-as-you-go (about \(rate(provider)) per GB per month). Nothing stops working."
+            default: return "\(free) of storage is free each month. Beyond that you pay as you go (about \(rate(provider)) per GB per month), with no upfront plan."
+            }
+        case .s3, .gcs, .azureBlob, .wasabi, .digitalOceanSpaces, .s3Compatible:
+            guard let price = provider.pricing else { return "Pay as you go: you are billed for what you store, requests and any downloads." }
+            return "Pay as you go, no free allowance: about \(rateText(price.storagePerGB)) per GB per month for storage. " + (provider.chargesEgress ? "Downloading data back also costs money, so keep this as an archive." : "Estimate only.")
+        case .other: return nil
+        }
+    }
+    private static func rateText(_ value: Double) -> String { String(format: "$%.3f", value) }
+    private static func rate(_ provider: Provider) -> String { provider.pricing.map { rateText($0.storagePerGB) } ?? "n/a" }
+}

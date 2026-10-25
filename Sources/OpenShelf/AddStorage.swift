@@ -626,11 +626,12 @@ struct EditStorageView: View {
                     if storage.provider == .cloudflareR2 {
                         ShelfSection(title: "Cloudflare analytics", subtitle: "Optional. With a read-only API token OpenShelf reads your real storage and request counts from Cloudflare (no billed list requests) and estimates request charges.") {
                             if manager.hasCloudflareToken(storage) && !draft.removeToken {
-                                Label("A token is saved.", systemImage: "checkmark.seal").font(.system(size: 12))
+                                let sharing = manager.spacesInAccount(of: storage).count
+                                Label(sharing > 1 ? "A token is saved and shared by \(sharing) spaces in this Cloudflare account." : "A token is saved.", systemImage: "checkmark.seal").font(.system(size: 12))
                                 Toggle("Remove saved token", isOn: $draft.removeToken)
                             }
                             secretField("API token (Account Analytics: Read)", text: $draft.apiToken)
-                            Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read. It is stored in an owner-only file and only sent to api.cloudflare.com.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+                            Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read. It is stored once per Cloudflare account (spaces in the same account share it) in an owner-only file and only sent to api.cloudflare.com. Backblaze B2, IDrive e2, S3 and GCS offer no usage API for storage keys, so they have no token field.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     if canReplaceCredentials && !locked {

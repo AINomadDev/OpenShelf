@@ -232,7 +232,7 @@ struct Dashboard: View {
                         }
                         if let quota, quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
                     }
-                }
+                }.help(quota.flatMap { UsageHint.text(provider: storage.provider, level: $0.level, overageBytes: $0.overage) } ?? "")
             }
             if rows.contains(where: { $0.provider.freeTierBytes != nil }) {
                 Label("The 10 GB free tier is per provider account, so spaces sharing an account add up. Beyond it, pay-as-you-go applies.", systemImage: "info.circle")
@@ -299,7 +299,7 @@ struct Dashboard: View {
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 8) {
                 if manager.connections.contains(where: { $0.provider.pricing != nil }) {
-                    Label("\(PricingInfo.dollars(manager.monthlyTotal)) / month est.", systemImage: "dollarsign.circle").font(.system(size: 12, weight: .semibold))
+                    Label("\(PricingInfo.dollars(manager.monthlyTotal)) / month est.", systemImage: "dollarsign.circle").font(.system(size: 12, weight: .semibold)).help("Estimate from approximate list prices for storage (plus R2 requests when analytics are connected). Egress, taxes and your plan's discounts are not included; the real bill comes from each provider.")
                 }
                 Label(manager.attentionCount == 0 ? "Everything looks fine" : "\(manager.attentionCount) need attention", systemImage: manager.attentionCount == 0 ? "checkmark.circle" : "exclamationmark.triangle")
                     .font(.system(size: 11)).foregroundStyle(manager.attentionCount == 0 ? ShelfTheme.muted : Color.orange)
@@ -343,16 +343,16 @@ struct Dashboard: View {
     private var totalsPanel: some View {
         let totals = manager.shelfTotals
         return HStack(alignment: .top, spacing: 12) {
-            metric(ByteCountFormatter.string(fromByteCount: totals.storedBytes, countStyle: .file), label: "Total stored on your shelf", symbol: "tray.full")
+            metric(ByteCountFormatter.string(fromByteCount: totals.storedBytes, countStyle: .file), label: "Total stored on your shelf", symbol: "tray.full", help: "Everything stored across all your spaces. Spaces that only report an account total are counted once.")
             if totals.quotaCapacity > 0 {
-                metric(ByteCountFormatter.string(fromByteCount: totals.quotaLeft, countStyle: .file), label: "Free of \(ByteCountFormatter.string(fromByteCount: totals.quotaCapacity, countStyle: .file)) in \(totals.quotaAccounts) account\(totals.quotaAccounts == 1 ? "" : "s") with a plan", symbol: "chart.pie")
+                metric(ByteCountFormatter.string(fromByteCount: totals.quotaLeft, countStyle: .file), label: "Free of \(ByteCountFormatter.string(fromByteCount: totals.quotaCapacity, countStyle: .file)) in \(totals.quotaAccounts) account\(totals.quotaAccounts == 1 ? "" : "s") with a plan", symbol: "chart.pie", help: "Google Drive and iCloud have a fixed plan. When it is full you cannot store more until you free space or buy a larger plan; there is no pay-as-you-go.")
             }
             if totals.freeTierCapacity > 0 {
-                metric(ByteCountFormatter.string(fromByteCount: totals.freeTierLeft, countStyle: .file), label: totals.freeTierLeft == 0 ? "Free tier used up · pay as you go" : "Free tier left of \(ByteCountFormatter.string(fromByteCount: totals.freeTierCapacity, countStyle: .file))", symbol: "gift")
+                metric(ByteCountFormatter.string(fromByteCount: totals.freeTierLeft, countStyle: .file), label: totals.freeTierLeft == 0 ? "Free tier used up · pay as you go" : "Free tier left of \(ByteCountFormatter.string(fromByteCount: totals.freeTierCapacity, countStyle: .file))", symbol: "gift", help: "Cloudflare R2, Backblaze B2 and IDrive e2 include 10 GB free per account. Once it is used up, storage keeps working and is billed pay-as-you-go per GB. R2 spaces in one Cloudflare account share a single allowance.")
             }
         }
     }
-    private func metric(_ value: String, label: String, symbol: String) -> some View {
+    private func metric(_ value: String, label: String, symbol: String, help: String = "") -> some View {
         HStack(spacing: 12) {
             Image(systemName: symbol).font(.system(size: 18)).foregroundStyle(ShelfTheme.muted).frame(width: 38, height: 42)
             VStack(alignment: .leading, spacing: 5) {
@@ -360,7 +360,7 @@ struct Dashboard: View {
                 Text(label).font(.system(size: 11)).foregroundStyle(ShelfTheme.muted)
             }
             Spacer(minLength: 0)
-        }.padding(15).frame(maxWidth: .infinity).background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 15))
+        }.padding(15).frame(maxWidth: .infinity).background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 15)).help(help)
     }
     private var setupGuide: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -408,6 +408,7 @@ struct StorageCard: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(storage.provider.title + (storage.provider.platformName.map { " · " + $0 } ?? "") + (storage.encrypted ? " · 🔒 Encrypted" : "")).font(.system(size: 11, weight: .medium)).foregroundStyle(ink.opacity(0.8)).lineLimit(1)
+                        .help(storage.encrypted ? "Names and contents are encrypted before upload. They look like random data in the provider's own tools. Keep the recovery key (⋯ menu) safe: without it the files cannot be read." : storage.provider.title + (storage.provider.platformName.map { " on " + $0 } ?? ""))
                     Text(storage.root.isEmpty ? "Account root" : storage.root).font(.system(size: 10, design: .monospaced)).foregroundStyle(ShelfTheme.muted)
                         .lineLimit(1).truncationMode(.middle).help(storage.root)
                 }
@@ -415,7 +416,7 @@ struct StorageCard: View {
                 HStack(spacing: 5) {
                     Circle().fill(isMounted ? Color.green : ShelfTheme.muted.opacity(0.5)).frame(width: 6, height: 6)
                     Text(statusText)
-                }.font(.system(size: 10, weight: .medium)).fixedSize().padding(.horizontal, 9).padding(.vertical, 5)
+                }.help(isMounted ? "Mounted as a folder in Finder. Uploads continue in the background even if you quit OpenShelf." : isConfigured ? "Saved but not mounted. Mount it to see it in Finder." : "Not connected yet. Connect to sign in or add credentials.").font(.system(size: 10, weight: .medium)).fixedSize().padding(.horizontal, 9).padding(.vertical, 5)
                     .background(isMounted ? Color.green.opacity(0.09) : paper, in: Capsule())
             }
         }
@@ -462,16 +463,29 @@ struct StorageCard: View {
     }
     private var modeRow: some View {
         HStack(spacing: 6) {
-            chip(storage.isArchive ? "archivebox" : "bolt", storage.isArchive ? "Archive" : "Live", tint: storage.isArchive && storage.provider.chargesEgress ? .orange : nil)
-            chip(storage.readOnly ? "lock" : "pencil", storage.readOnly ? "Read-only" : "Read & write")
+            chip(storage.isArchive ? "archivebox" : "bolt", storage.isArchive ? "Archive" : "Live", tint: storage.isArchive && storage.provider.chargesEgress ? .orange : nil, help: modeHelp)
+            chip(storage.readOnly ? "lock" : "pencil", storage.readOnly ? "Read-only" : "Read & write", help: storage.readOnly ? "OpenShelf will not change or delete anything in this space." : "Files you add, change or delete here are written to the cloud.")
             Spacer(minLength: 4)
             Toggle("Auto-mount", isOn: Binding(get: { storage.autoMount }, set: { manager.setAutoMount(storage, enabled: $0) })).toggleStyle(.switch).controlSize(.mini)
                 .font(.system(size: 10)).foregroundStyle(ShelfTheme.muted).fixedSize()
         }
     }
-    private func chip(_ symbol: String, _ text: String, tint: Color? = nil) -> some View {
+    private func chip(_ symbol: String, _ text: String, tint: Color? = nil, help: String) -> some View {
         Label(text, systemImage: symbol).font(.system(size: 10, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(tint ?? ShelfTheme.muted)
-            .padding(.horizontal, 8).padding(.vertical, 4).background((tint ?? ShelfTheme.muted).opacity(0.1), in: Capsule())
+            .padding(.horizontal, 8).padding(.vertical, 4).background((tint ?? ShelfTheme.muted).opacity(0.1), in: Capsule()).help(help)
+    }
+    private var modeHelp: String {
+        if storage.isArchive {
+            return storage.provider.chargesEgress
+                ? "Archive mode: files are downloaded once, cached on this Mac and not read ahead. This provider bills for downloads, so avoid streaming or browsing large files here."
+                : "Archive mode: files are downloaded once and cached, which keeps requests low. \(storage.provider.title) has no egress fees, but requests can still count towards limits."
+        }
+        return "Live mode: behaves like a normal drive and reads files on demand. " + (storage.provider.chargesEgress ? "Every read is a billed download on this provider." : "Fine for this provider; keep an eye on request counts.")
+    }
+    private var usageHint: String? {
+        let value = manager.usage[storage.id]
+        guard let quota = storage.quota(for: value) else { return nil }
+        return UsageHint.text(provider: storage.provider, level: quota.level, overageBytes: quota.overage)
     }
     private func archiveCaption(_ caption: String?) -> String {
         guard storage.isArchive else { return caption ?? " " }
@@ -488,9 +502,9 @@ struct StorageCard: View {
                     PricingButton(storage: storage, usedBytes: value?.usedBytes)
                     Spacer(minLength: 4)
                     if let remaining = parts.remaining { Text(remaining).font(.system(size: 12, weight: .semibold)).foregroundStyle(quota.level == .warning ? Color.orange : ink) }
-                }
+                }.help(usageHint ?? "")
                 if quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
-                Text((parts.warning.map { $0 + (storage.provider.pricing.map { " (~" + PricingInfo.dollars($0.monthlyStorageCost(usedBytes: quota.used)) + "/mo)" } ?? "") }) ?? archiveCaption(parts.caption)).font(.system(size: 10)).foregroundStyle(parts.warning != nil ? Color.red : ShelfTheme.muted).lineLimit(2)
+                Text((parts.warning.map { $0 + (storage.provider.pricing.map { " (~" + PricingInfo.dollars($0.monthlyStorageCost(usedBytes: quota.used)) + "/mo)" } ?? "") }) ?? archiveCaption(parts.caption)).font(.system(size: 10)).foregroundStyle(parts.warning != nil ? Color.red : ShelfTheme.muted).lineLimit(2).help(usageHint ?? "")
             } else {
                 let unreported = value?.isReported == false
                 Text(unreported ? (value?.measured == true ? UsageText.bytes(value?.usedBytes ?? 0) : "—") : "…").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(unreported && value?.measured != true ? ShelfTheme.muted : ink)

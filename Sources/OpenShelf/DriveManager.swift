@@ -620,7 +620,7 @@ final class DriveManager: ObservableObject {
     func refreshUsage(_ storage: Storage) {
         guard !Self.isPreview, !usageRefreshing.contains(storage.id), let binary = rclone else { return }
         if storage.provider == .iCloud { refreshICloudUsage(storage, binary: binary); return }
-        if storage.provider == .cloudflareR2, FileManager.default.fileExists(atPath: storage.apiTokenURL(home: home).path) {
+        if storage.provider == .cloudflareR2, hasCloudflareToken(storage) {
             usageRefreshing.insert(storage.id)
             lastUsageAttempt[storage.id] = Date()
             forceUsage.remove(storage.id)
@@ -635,7 +635,7 @@ final class DriveManager: ObservableObject {
     }
     /// Reads month-to-date storage and request counts from Cloudflare. Returns false when it could not, so the caller can fall back to listing.
     private func fetchR2Insight(_ storage: Storage) async -> Bool {
-        guard let token = (try? String(contentsOf: storage.apiTokenURL(home: home), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty,
+        guard let token = (tokenURL(for: storage).flatMap { try? String(contentsOf: $0, encoding: .utf8) })?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty,
               let text = try? String(contentsOf: storage.configURL(home: home), encoding: .utf8),
               let account = R2Analytics.accountID(fromHost: CredentialHealth.configValue("endpoint", in: text).flatMap { URL(string: $0)?.host }),
               let bucket = R2Analytics.bucket(of: storage.root) else { insightErrors[storage.id] = "Cloudflare token or bucket not set up."; return false }
@@ -652,18 +652,37 @@ final class DriveManager: ObservableObject {
         usageStore.save(usage)
         return true
     }
+    /// One token per Cloudflare account, shared by every space in it. Falls back to a token saved for the single space.
+    private func tokenURL(for storage: Storage) -> URL? {
+        let own = storage.apiTokenURL(home: home)
+        if let account = poolKey(storage) {
+            let shared = Storage.accountTokenURL(home: home, account: account)
+            if FileManager.default.fileExists(atPath: shared.path) { return shared }
+        }
+        return FileManager.default.fileExists(atPath: own.path) ? own : nil
+    }
     func saveCloudflareToken(_ token: String, for storage: Storage) throws {
-        let url = storage.apiTokenURL(home: home)
+        let own = storage.apiTokenURL(home: home)
+        let url = poolKey(storage).map { Storage.accountTokenURL(home: home, account: $0) } ?? own
         let clean = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        if clean.isEmpty { try? FileManager.default.removeItem(at: url); r2Insights[storage.id] = nil; insightErrors[storage.id] = nil; InsightStore(home: home).save(r2Insights); return }
+        if clean.isEmpty {
+            try? FileManager.default.removeItem(at: url); try? FileManager.default.removeItem(at: own)
+            for space in spacesInAccount(of: storage) { r2Insights[space.id] = nil; insightErrors[space.id] = nil }
+            InsightStore(home: home).save(r2Insights)
+            return
+        }
         guard !clean.contains("\n"), clean.count < 400 else { throw StorageError.invalidToken }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try Data(clean.utf8).write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        forceUsage.insert(storage.id)
-        lastUsageAttempt[storage.id] = nil
+        for space in spacesInAccount(of: storage) { forceUsage.insert(space.id); lastUsageAttempt[space.id] = nil }
     }
-    func hasCloudflareToken(_ storage: Storage) -> Bool { FileManager.default.fileExists(atPath: storage.apiTokenURL(home: home).path) }
+    func hasCloudflareToken(_ storage: Storage) -> Bool { tokenURL(for: storage) != nil }
+    /// Spaces that use the same provider account (and therefore the same token), including this one.
+    func spacesInAccount(of storage: Storage) -> [Storage] {
+        guard let key = poolKey(storage) else { return [storage] }
+        return connections.filter { $0.provider == storage.provider && poolKey($0) == key }
+    }
     private func refreshUsageViaRclone(_ storage: Storage, binary: URL) {
         guard storage.provider.reportsQuota else {
             usage[storage.id] = .unreported(previous: usage[storage.id])

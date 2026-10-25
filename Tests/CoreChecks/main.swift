@@ -347,3 +347,22 @@ do {
     }
     print("PASS: Swift providers match providers.json")
 }
+
+do {
+    let full = UsageHint.text(provider: .googleDrive, level: .exceeded)!
+    precondition(full.contains("full") && full.contains("no pay-as-you-go"))
+    precondition(UsageHint.text(provider: .iCloud, level: .ok)!.contains("fixed storage plan"))
+    let over = UsageHint.text(provider: .cloudflareR2, level: .exceeded, overageBytes: 5_000_000_000)!
+    precondition(over.contains("pay-as-you-go") && over.contains("5") && over.contains("$0.015"))
+    precondition(UsageHint.text(provider: .backblazeB2, level: .ok)!.contains("free each month"))
+    precondition(UsageHint.text(provider: .gcs, level: .unlimited)!.contains("Downloading data back"))
+    precondition(UsageHint.text(provider: .other, level: .ok) == nil)
+    print("PASS: pay-as-you-go and fixed-plan tooltip wording")
+}
+
+do {
+    let home = URL(fileURLWithPath: "/h", isDirectory: true)
+    let shared = Storage.accountTokenURL(home: home, account: "abc123")
+    precondition(shared.lastPathComponent == "cf-abc123.cftoken" && shared.path.hasSuffix("accounts/cf-abc123.cftoken"))
+    print("PASS: Cloudflare token is stored per account")
+}

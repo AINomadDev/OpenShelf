@@ -105,6 +105,8 @@ struct InsightStore {
 
 extension Storage {
     /// Cloudflare API token, kept apart from the S3 keys in its own owner-only file.
+    /// Token shared by every space in one Cloudflare account.
+    static func accountTokenURL(home: URL, account: String) -> URL { support(home: home).appendingPathComponent("accounts/cf-" + account + ".cftoken") }
     func apiTokenURL(home: URL) -> URL { Self.support(home: home).appendingPathComponent("accounts/" + id + ".cftoken") }
 }
 
