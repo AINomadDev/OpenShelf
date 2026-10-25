@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>OpenShelf</title><link rel="stylesheet" href="style.css"></head>
+<body><header><h1>OpenShelf</h1><span>Bring your own storage</span><button id="add">+ Add storage</button></header>
+<main><p id="err" class="err"></p><section id="spaces"></section>
+<dialog id="dlg"><form method="dialog" id="form"><h2>Add storage</h2>
+<label>Provider<select id="prov"></select></label><ol id="steps"></ol><button type="button" id="console">Open provider console</button>
+<p id="note" class="muted"></p><div id="fields"></div>
+<label>Name<input id="title" required></label><label>Bucket / container (path)<input id="root" required></label>
+<label><input type="checkbox" id="archive" checked> Archive mode (avoid repeated downloads)</label>
+<label><input type="checkbox" id="ro"> Read-only</label>
+<menu><button value="cancel" formnovalidate>Cancel</button><button id="save" value="ok">Save</button></menu></form></dialog></main>
+<script src="app.js"></script></body></html>

@@ -1,0 +1,9 @@
+body{font-family:system-ui,sans-serif;margin:0;background:#101418;color:#e8edf2}
+header{display:flex;gap:12px;align-items:baseline;padding:16px 24px;border-bottom:1px solid #223}header h1{margin:0}header span{color:#8a97a5;flex:1}
+main{padding:24px}.card{background:#1a2128;border-radius:12px;padding:16px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center}.row h3{margin:0;flex:1}.muted{color:#8a97a5;font-size:13px}.err{color:#ff8a80}
+.bar{height:8px;background:#2a333c;border-radius:4px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:#4caf50}
+.warning i{background:#ffb300}.exceeded i{background:#f44336}.badge{font-size:12px;background:#2a333c;border-radius:8px;padding:2px 8px}
+button{background:#2d6cdf;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer}button.sec{background:#2a333c}
+dialog{background:#1a2128;color:#e8edf2;border:0;border-radius:12px;min-width:420px}label{display:block;margin:8px 0}input,select{width:100%;padding:6px;box-sizing:border-box}
+input[type=checkbox]{width:auto}menu{display:flex;gap:8px;justify-content:flex-end;padding:0}

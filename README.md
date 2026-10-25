@@ -1,6 +1,6 @@
 # OpenShelf
 
-> **Bring Your Own Storage.** OpenShelf mounts the cloud accounts and buckets you already pay for as folders on your Mac. Installs from the earlier *CloudShelf* name keep using their existing `~/CloudShelf` and `~/Library/.../CloudShelf` folders and saved rclone remotes; nothing is moved.
+> **Bring Your Own Storage.** OpenShelf mounts the cloud accounts and buckets you already pay for as folders on your Mac. Installs made before the rename keep using their existing legacy folders and saved connections; nothing is moved.
 
 A local macOS dashboard and menu-bar app with **multiple named accounts and Finder spaces** for Google Drive, iCloud Drive, Amazon S3, Google Cloud Storage, Azure Blob Storage, Cloudflare R2, Backblaze B2, IDrive e2, and S3-compatible endpoints. Uses your existing subscriptions through rclone. There is no OpenShelf server, account, analytics, or storage subscription. Your providers may bill their own storage and data-transfer charges.
 
@@ -34,7 +34,7 @@ Each space has an independent name, Finder folder, cache, log, control endpoint,
 
 Credentials stay out of the connection manifest and process arguments. New-account engine files are stored with owner-only permissions under `~/Library/Application Support/OpenShelf/accounts/`. These are protected local files, not Keychain storage or an added encryption layer. Existing legacy credentials remain in the default rclone configuration. Encrypted default rclone configurations still require an external unlock mechanism.
 
-Existing `cloudshelf-google` and `cloudshelf-icloud` connections migrate without changing credentials, Finder paths, or caches. The secret-free connection list is at `~/Library/Application Support/OpenShelf/connections.json`. Corrupt or conflicting manifests are refused instead of silently resetting connections. A disconnected space can be removed from its card's More menu; removal keeps cloud files, credentials, and cache data.
+Existing Google Drive and iCloud connections from earlier versions migrate without changing credentials, Finder paths, or caches. The secret-free connection list is at `~/Library/Application Support/OpenShelf/connections.json`. Corrupt or conflicting manifests are refused instead of silently resetting connections. A disconnected space can be removed from its card's More menu; removal keeps cloud files, credentials, and cache data.
 
 Cloud object storage may charge for requests and downloads. Cold/archive objects may require restoration. These backends do not provide all normal filesystem semantics: rename, locking, folder, metadata, and trash behavior vary. Do not assume a cached cloud mount is a backup or a distributed file-locking system.
 
@@ -49,9 +49,9 @@ open dist/OpenShelf.app
 
 Drag `dist/OpenShelf.app` into Applications to install for regular use. The build is locally ad-hoc signed, not notarized for public distribution. Open the dashboard, connect each account, then choose Open drive and Show in Finder. Closing the dashboard leaves the menu-bar app running..
 
-Finder locations: new installs use `~/OpenShelf/<name> · <unique suffix>`. If a `~/CloudShelf` folder already exists from the earlier name, it keeps being used (including `~/CloudShelf/Google Drive` and `~/CloudShelf/iCloud Drive`), and likewise `~/Library/.../CloudShelf` for data, caches and logs.
+Finder locations: new installs use `~/OpenShelf/<name> · <unique suffix>`. Installs that predate the rename keep using their existing legacy folders for mounts, data, caches and logs.
 
-Caches live separately under `~/Library/Caches/OpenShelf/`; logs under `~/Library/Logs/OpenShelf/` (or the `CloudShelf` equivalents on older installs). Add either mounted location to Finder Favorites if desired. Existing iCloud/Google sync folders are not used as the backing storage.
+Caches live separately under `~/Library/Caches/OpenShelf/`; logs under `~/Library/Logs/OpenShelf/`. Add either mounted location to Finder Favorites if desired. Existing iCloud/Google sync folders are not used as the backing storage.
 
 ## Platforms and design notes
 
@@ -71,7 +71,7 @@ Caches live separately under `~/Library/Caches/OpenShelf/`; logs under `~/Librar
 
 ## Manual verification after sign-in
 
-1. List each remote: `rclone lsd cloudshelf-google:` and `rclone lsd cloudshelf-icloud:`.
+1. List your saved remotes with `rclone listremotes`, then check each with `rclone lsd <remote>:`.
 2. Mount each separately. Confirm both Finder locations appear and provider contents are distinct.
 3. Copy a disposable test file to each mount, wait for upload, and verify contents on each provider's website.
 4. Open and seek in a large disposable video; watch cache growth and check behavior when the network disconnects.
@@ -102,3 +102,15 @@ Normal quit/logout requests try to unmount idle drives before exiting. Open file
 ## Multi-account verification
 
 Core checks cover preserved legacy paths, multiple accounts of the same provider, distinct caches/configs/ports, read-only engine flags, manifest persistence, duplicate/corrupt manifest refusal, and OAuth output parsing. Provider setup fields were checked against the bundled engine schema. Live testing for newly added AWS, GCS, Azure, and S3-compatible services requires credentials and has not been completed. A real second Google identity also requires its own browser authorization before it can be claimed verified.
+
+## Windows and Linux (preview)
+
+`desktop/` contains a Tauri app with the same model: bring-your-own storage, archive mode, free-tier usage, and drives that run as detached rclone processes so uploads survive closing the app.
+
+Requirements: [rclone](https://rclone.org/install/) on PATH (or next to the app), plus [WinFsp](https://winfsp.dev/) on Windows or FUSE (`fuse3`) on Linux.
+
+```sh
+cd desktop/src-tauri && cargo test && cargo run
+```
+
+Status: unit tests run in CI on Linux, Windows and macOS. Mounting has only been exercised on macOS so far, so treat Windows/Linux as untested preview. Google Drive and iCloud (interactive sign-in) are macOS-only for now.
