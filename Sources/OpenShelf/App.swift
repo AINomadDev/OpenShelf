@@ -126,7 +126,7 @@ struct Dashboard: View {
                                 }.buttonStyle(ShelfButtonStyle())
                             }.padding(32).frame(maxWidth: .infinity).background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18))
                         }
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), alignment: .top)], alignment: .leading, spacing: 16) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: .infinity), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
                             ForEach(manager.visibleConnections) { StorageCard(storage: $0, manager: manager) }
                         }
                         HStack(alignment: .top, spacing: 10) {
@@ -140,6 +140,7 @@ struct Dashboard: View {
         }.frame(minWidth: 1000, minHeight: 710).background(paper).foregroundStyle(ink).preferredColorScheme(.light)
         .sheet(isPresented: $manager.showingGuide) { setupGuide }
         .sheet(isPresented: $manager.showingAddStorage) { AddStorageView(manager: manager) }
+        .sheet(item: $manager.spaceToEdit) { EditStorageView(manager: manager, storage: $0) }
         .sheet(isPresented: $manager.showingActivity) { activityPanel }
         .confirmationDialog("Open this archive in Finder?", isPresented: Binding(get: { manager.archiveToOpen != nil }, set: { if !$0 { manager.archiveToOpen = nil } }), titleVisibility: .visible) {
             Button("Open in Finder") {
@@ -184,9 +185,10 @@ struct Dashboard: View {
                             Spacer()
                             if manager.usageRefreshing.contains(storage.id) { ProgressView().controlSize(.mini) }
                             else if let quota { Text(UsageText.summary(quota, freeTier: storage.provider.freeTierBytes != nil && value?.totalBytes == nil)).font(.system(size: 11)).foregroundStyle(quota.level == .exceeded ? Color.red : ShelfTheme.muted) }
+                            else if value?.isReported == false { Text("Quota not reported").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).help("This provider does not expose storage totals for this space (iCloud Drive and Google Shared Drives).") }
                             else { Text("Measuring…").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted) }
                         }
-                        if let quota, quota.limit != nil { UsageBar(quota: quota) }
+                        if let quota, quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
                     }
                 }
             }
@@ -316,6 +318,7 @@ struct StorageCard: View {
                 }.font(.system(size: 10, weight: .medium)).padding(.horizontal, 9).padding(.vertical, 6)
                     .background(isMounted ? Color.green.opacity(0.07) : paper, in: Capsule())
                 Menu {
+                    Button("Edit details…") { manager.spaceToEdit = storage }.disabled(isMounted || manager.isRunning(storage) || isBusy)
                     Button("Copy Finder path") { manager.copyPath(storage) }
                     Button("View log") { manager.showLog(storage) }
                     if storage.provider.prefersArchive {
@@ -329,11 +332,9 @@ struct StorageCard: View {
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize().help("Space actions")
             }
             VStack(alignment: .leading, spacing: 5) {
-                Text(storage.title).font(.system(size: 20, weight: .semibold, design: .rounded)).tracking(-0.4).lineLimit(2)
-                Text(storage.provider.title + (storage.root.isEmpty ? "" : " · " + storage.root)).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted).lineLimit(2)
-                if storage.isArchive {
-                    Label(storage.provider.chargesEgress ? "Archive · downloads may cost money" : "Archive · no egress fees", systemImage: "archivebox").font(.system(size: 10, weight: .medium)).foregroundStyle(ShelfTheme.muted)
-                }
+                Text(storage.title).font(.system(size: 20, weight: .semibold, design: .rounded)).tracking(-0.4).lineLimit(2).frame(minHeight: 48, alignment: .topLeading)
+                Text(storage.provider.title + (storage.root.isEmpty ? "" : " · " + storage.root)).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted).lineLimit(2).frame(minHeight: 32, alignment: .topLeading)
+                Label(storage.isArchive ? (storage.provider.chargesEgress ? "Archive · downloads may cost money" : "Archive · no egress fees") : "Live · files open on demand", systemImage: storage.isArchive ? "archivebox" : "bolt").font(.system(size: 10, weight: .medium)).foregroundStyle(ShelfTheme.muted)
             }
             HStack {
                 Label(storage.readOnly ? "Read-only" : "Read & write", systemImage: storage.readOnly ? "lock" : "pencil")
@@ -342,11 +343,15 @@ struct StorageCard: View {
             }.font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
             Divider().opacity(0.5)
             VStack(alignment: .leading, spacing: 7) {
-                if let quota = storage.quota(for: manager.usage[storage.id]) {
-                    VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 5) {
+                    if let quota = storage.quota(for: manager.usage[storage.id]) {
                         Text(UsageText.summary(quota, freeTier: storage.provider.freeTierBytes != nil && manager.usage[storage.id]?.totalBytes == nil))
                             .font(.system(size: 11, weight: .medium)).foregroundStyle(quota.level == .exceeded ? Color.red : ShelfTheme.ink)
-                        if quota.limit != nil { UsageBar(quota: quota) }
+                        if quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
+                    } else {
+                        Text(manager.usage[storage.id]?.isReported == false ? "Storage total not reported by this provider" : "Measuring storage…")
+                            .font(.system(size: 11)).foregroundStyle(ShelfTheme.muted)
+                        Color.clear.frame(height: 6)
                     }
                 }
                 if let stats = manager.activity[storage] {
@@ -360,6 +365,7 @@ struct StorageCard: View {
                 Text(manager.statuses[storage] ?? (isConfigured ? "Ready when you are." : "Connect this account to get started."))
                     .font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).lineLimit(3).frame(minHeight: 28, alignment: .top)
             }
+            Spacer(minLength: 0)
             HStack(spacing: 8) {
                 Button {
                     if isMounted { if storage.isArchive && storage.provider.chargesEgress { manager.archiveToOpen = storage } else { manager.open(storage) } }
@@ -377,7 +383,7 @@ struct StorageCard: View {
                     if isMounted { Task { await manager.unmount(storage) } } else { manager.setup(storage) }
                 }.buttonStyle(ShelfButtonStyle()).disabled(isBusy || (!isMounted && (!isConfigured || manager.isRunning(storage))))
             }
-        }.padding(20).frame(maxWidth: .infinity, alignment: .topLeading).background(Color.white, in: RoundedRectangle(cornerRadius: 19))
+        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.white, in: RoundedRectangle(cornerRadius: 19))
             .overlay(RoundedRectangle(cornerRadius: 19).stroke(ink.opacity(0.075)))
     }
 }

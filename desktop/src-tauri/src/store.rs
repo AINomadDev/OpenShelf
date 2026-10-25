@@ -88,6 +88,20 @@ pub fn new_space(paths: &Paths, existing: &[Space], provider: &str, title: &str,
     Ok(Space { id, provider: provider.into(), title, root, read_only, archive, port, mount_path })
 }
 
+/// Applies edited details to one space. Identity, port and credentials are untouched; the mount folder follows the new name.
+pub fn edit_space(paths: &Paths, spaces: &[Space], id: &str, title: &str, root: &str, read_only: bool, archive: bool) -> Result<Vec<Space>, String> {
+    let title = valid_title(title)?;
+    let root = valid_root(root)?;
+    let mut out = spaces.to_vec();
+    let space = out.iter_mut().find(|s| s.id == id).ok_or("Space not found.")?;
+    space.title = title.clone();
+    space.root = root;
+    space.read_only = read_only;
+    space.archive = archive;
+    space.mount_path = paths.mounts.join(format!("{title} - {}", &id[..8.min(id.len())])).to_string_lossy().to_string();
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +117,18 @@ mod tests {
         fs::write(p.spaces(), "corrupt").unwrap();
         assert!(load_spaces(&p).is_err());
         let _ = fs::remove_dir_all(&p.base);
+    }
+    #[test]
+    fn editing_keeps_identity_and_validates() {
+        let p = paths();
+        let a = new_space(&p, &[], "r2", "Photos", "bucket", false, true).unwrap();
+        let out = edit_space(&p, &[a.clone()], &a.id, " Family ", "/bucket/2024/", true, false).unwrap();
+        let e = &out[0];
+        assert!(e.id == a.id && e.port == a.port && e.provider == a.provider);
+        assert!(e.title == "Family" && e.root == "bucket/2024" && e.read_only && !e.archive);
+        assert!(e.mount_path.contains("Family"));
+        assert!(edit_space(&p, &[a.clone()], &a.id, "a/b", "bucket", false, true).is_err());
+        assert!(edit_space(&p, &[a.clone()], "missing", "x", "bucket", false, true).is_err());
     }
     #[test]
     fn names_and_roots_validated() {

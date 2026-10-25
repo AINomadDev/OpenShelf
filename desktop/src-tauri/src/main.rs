@@ -46,6 +46,30 @@ fn find_space(paths: &Paths, id: &str) -> Result<Space, String> {
 }
 
 #[tauri::command]
+async fn update_space(id: String, title: String, root: String, read_only: bool, archive: bool, fields: HashMap<String, String>) -> Result<(), String> {
+    let paths = Paths::system();
+    let spaces = store::load_spaces(&paths)?;
+    let old = spaces.iter().find(|s| s.id == id).ok_or("Space not found.")?.clone();
+    if mount::is_running(&paths, &old) { return Err("Disconnect this space before editing it.".into()); }
+    let updated = store::edit_space(&paths, &spaces, &id, &title, &root, read_only, archive)?;
+    // Credentials are only rewritten when new values were entered; saved ones are never shown.
+    if fields.values().any(|v| !v.trim().is_empty()) {
+        let p = providers::find(&old.provider).ok_or("Unknown provider.")?;
+        let config = providers::build_config(p, &fields)?;
+        let mut text = format!("[{}]\n", mount::remote_name(&old));
+        for (k, v) in config { text.push_str(&format!("{k} = {v}\n")); }
+        store::write_private(&paths.conf(&id), &text).map_err(|e| e.to_string())?;
+    }
+    store::save_spaces(&paths, &updated)?;
+    if old.root != root.trim().trim_matches('/') {
+        let mut usage = store::load_usage(&paths);
+        usage.remove(&id);
+        store::save_usage(&paths, &usage);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn start_space(id: String) -> Result<(), String> { let p = Paths::system(); mount::start(&p, &find_space(&p, &id)?) }
 
 #[tauri::command]
@@ -123,7 +147,7 @@ async fn open_folder(id: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![catalogue, list_spaces, add_space, start_space, stop_space, remove_space, transfers, refresh_usage, clean_junk, open_url, open_folder])
+        .invoke_handler(tauri::generate_handler![catalogue, list_spaces, add_space, update_space, start_space, stop_space, remove_space, transfers, refresh_usage, clean_junk, open_url, open_folder])
         .run(tauri::generate_context!())
         .expect("failed to run OpenShelf");
 }

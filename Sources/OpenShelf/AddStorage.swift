@@ -17,6 +17,7 @@ final class ConnectionDraft: ObservableObject {
     @Published var selectedRemote = ""
     @Published var working = false
     @Published var message: String?
+    @Published var replacingCredentials = false
     private var authProcess: Process?
     private var cancelled = false
     private let home = FileManager.default.homeDirectoryForCurrentUser
@@ -114,25 +115,8 @@ final class ConnectionDraft: ObservableObject {
                 manager.showingAddStorage = false
                 manager.setup(storage)
                 return
-            case .s3, .s3Compatible:
-                try s3Values(&values, required: required)
-            case .cloudflareR2, .idriveE2:
-                try s3Values(&values, required: required)
-            case .backblazeB2:
-                values["account"] = try required("account", "application key ID")
-                values["key"] = try required("key", "application key")
-            case .gcs:
-                // New GCS connections use bucket-level IAM, without object ACL grants.
-                values["bucket_policy_only"] = "true"
-                let file = try required("credential_file", "service-account JSON file")
-                let data = try Data(contentsOf: URL(fileURLWithPath: file))
-                guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], object["type"] as? String == "service_account" else { throw SetupError.serviceAccount }
-                let compact = try JSONSerialization.data(withJSONObject: object)
-                values["service_account_credentials"] = String(decoding: compact, as: UTF8.self)
-            case .azureBlob:
-                let sas = try required("sas_url", "SAS URL")
-                guard let url = URL(string: sas), url.scheme == "https", url.host != nil, url.query != nil else { throw SetupError.endpoint }
-                values["sas_url"] = sas
+            case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .backblazeB2, .gcs, .azureBlob:
+                try objectStorageValues(&values, required: required)
             case .other: throw SetupError.missing("provider")
             }
             try writeConfig(values, storage: storage)
@@ -147,6 +131,80 @@ final class ConnectionDraft: ObservableObject {
             if let pending { try? FileManager.default.removeItem(at: pending.configURL(home: home)) }
             message = error.localizedDescription
         }
+    }
+    // Credential values for every key-based object-storage provider; shared by new connections and credential replacement.
+    private func objectStorageValues(_ values: inout [String: String], required: (String, String) throws -> String) throws {
+        switch provider {
+        case .s3, .s3Compatible, .cloudflareR2, .idriveE2:
+            try s3Values(&values, required: required)
+        case .backblazeB2:
+            values["account"] = try required("account", "application key ID")
+            values["key"] = try required("key", "application key")
+        case .gcs:
+            // New GCS connections use bucket-level IAM, without object ACL grants.
+            values["bucket_policy_only"] = "true"
+            let file = try required("credential_file", "service-account JSON file")
+            let data = try Data(contentsOf: URL(fileURLWithPath: file))
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], object["type"] as? String == "service_account" else { throw SetupError.serviceAccount }
+            let compact = try JSONSerialization.data(withJSONObject: object)
+            values["service_account_credentials"] = String(decoding: compact, as: UTF8.self)
+        case .azureBlob:
+            let sas = try required("sas_url", "SAS URL")
+            guard let url = URL(string: sas), url.scheme == "https", url.host != nil, url.query != nil else { throw SetupError.endpoint }
+            values["sas_url"] = sas
+        default: break
+        }
+    }
+    private func requiredField(_ key: String, _ label: String) throws -> String {
+        guard let value = fields[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { throw SetupError.missing(label) }
+        return value
+    }
+    func load(from storage: Storage) {
+        provider = storage.provider
+        name = storage.title
+        root = storage.root
+        readOnly = storage.readOnly
+        autoMount = storage.autoMount
+        archive = storage.isArchive
+        replacingCredentials = false
+        fields = [:]
+        message = nil
+    }
+    /// Saves edited details. New credentials are written first and validated; the previous config is restored if the check fails.
+    func saveEdits(_ manager: DriveManager, original: Storage) async {
+        guard !working else { return }
+        working = true
+        message = nil
+        defer { working = false }
+        let configURL = original.configURL(home: home)
+        let previousConfig = try? Data(contentsOf: configURL)
+        do {
+            let updated = try original.updating(title: name, root: root, readOnly: readOnly, autoMount: autoMount, mode: archive ? .archive : .live, existing: manager.connections)
+            let replacing = replacingCredentials && original.ownConfig && original.provider.isObjectStorage
+            if replacing {
+                provider = original.provider
+                var values = ["type": original.backend]
+                try objectStorageValues(&values, required: requiredField)
+                try writeConfig(values, storage: updated)
+            }
+            if (replacing || updated.root != original.root), let binary = manager.rclone {
+                message = "Testing access to this space…"
+                do { try await validate(binary, updated) }
+                catch {
+                    if replacing { restoreConfig(previousConfig, at: configURL) }
+                    throw error
+                }
+            }
+            try manager.replace(original, with: updated)
+            fields = [:]
+            manager.spaceToEdit = nil
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+    private func restoreConfig(_ data: Data?, at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        if let data { FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) }
     }
     // Shared by every S3-API provider; only the endpoint and region rules differ per vendor.
     private func s3Values(_ values: inout [String: String], required: (String, String) throws -> String) throws {
@@ -410,13 +468,40 @@ struct AddStorageView: View {
             draft.step = 2
         } catch { draft.message = error.localizedDescription }
     }
-    @ViewBuilder private var providerFields: some View {
+    private var providerFields: some View { ProviderFields(draft: draft) }
+    private func field(_ title: String, text: Binding<String>, prompt: String = "") -> some View { inputField(title, text: text, prompt: prompt) }
+    private func secret(_ title: String, text: Binding<String>) -> some View { secretField(title, text: text) }
+}
+
+func inputField(_ title: String, text: Binding<String>, prompt: String = "") -> some View {
+    VStack(alignment: .leading, spacing: 7) {
+        Text(title).font(.system(size: 12, weight: .medium))
+        TextField(prompt, text: text).textFieldStyle(.plain).font(.system(size: 13)).padding(12)
+            .background(ShelfTheme.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(ShelfTheme.ink.opacity(0.12)))
+            .accessibilityLabel(title)
+    }
+}
+
+func secretField(_ title: String, text: Binding<String>) -> some View {
+    VStack(alignment: .leading, spacing: 7) {
+        Text(title).font(.system(size: 12, weight: .medium))
+        SecureField(title, text: text).textFieldStyle(.plain).font(.system(size: 13)).padding(12)
+            .background(ShelfTheme.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(ShelfTheme.ink.opacity(0.12)))
+            .accessibilityLabel(title)
+    }
+}
+
+struct ProviderFields: View {
+    @ObservedObject var draft: ConnectionDraft
+    var body: some View {
         switch draft.provider {
         case .googleDrive:
             Toggle("Reuse Google app credentials already on this Mac", isOn: $draft.reuseGoogleClient)
             if !draft.reuseGoogleClient {
-                field("Desktop OAuth client ID", text: draft.value("client_id"))
-                secret("Desktop OAuth client secret", text: draft.value("client_secret"))
+                inputField("Desktop OAuth client ID", text: draft.value("client_id"))
+                secretField("Desktop OAuth client secret", text: draft.value("client_secret"))
             }
             Text("Each account signs in separately in your browser. Reusing app credentials does not copy account tokens. Your Google project must allow the additional account as a test user when in Testing mode.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -424,24 +509,24 @@ struct AddStorageView: View {
             Text("Apple sign-in and 2FA open in Terminal. This experimental connector needs periodic reauthentication. Each Apple account has its own configuration and Finder location.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         case .s3, .s3Compatible:
-            if draft.provider == .s3Compatible { field("HTTPS endpoint", text: draft.value("endpoint"), prompt: "https://…") }
-            field("Region", text: draft.value("region"), prompt: "us-east-1")
-            field("Access key ID", text: draft.value("access_key_id"))
-            secret("Secret access key", text: draft.value("secret_access_key"))
-            secret("Session token (optional)", text: draft.value("session_token"))
+            if draft.provider == .s3Compatible { inputField("HTTPS endpoint", text: draft.value("endpoint"), prompt: "https://…") }
+            inputField("Region", text: draft.value("region"), prompt: "us-east-1")
+            inputField("Access key ID", text: draft.value("access_key_id"))
+            secretField("Secret access key", text: draft.value("secret_access_key"))
+            secretField("Session token (optional)", text: draft.value("session_token"))
         case .cloudflareR2:
-            field("Cloudflare account ID", text: draft.value("account_id"), prompt: "32-character ID from the R2 overview page")
-            field("Access key ID", text: draft.value("access_key_id"))
-            secret("Secret access key", text: draft.value("secret_access_key"))
+            inputField("Cloudflare account ID", text: draft.value("account_id"), prompt: "32-character ID from the R2 overview page")
+            inputField("Access key ID", text: draft.value("access_key_id"))
+            secretField("Secret access key", text: draft.value("secret_access_key"))
             Text("Create an R2 API token scoped to this bucket (Object Read & Write). The endpoint is built from your account ID.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         case .backblazeB2:
-            field("Application key ID", text: draft.value("account"))
-            secret("Application key", text: draft.value("key"))
+            inputField("Application key ID", text: draft.value("account"))
+            secretField("Application key", text: draft.value("key"))
             Text("Use an application key restricted to this bucket rather than your master key.").font(.caption).foregroundStyle(.secondary)
         case .idriveE2:
-            field("HTTPS endpoint", text: draft.value("endpoint"), prompt: "https://….idrivee2-….com")
-            field("Access key ID", text: draft.value("access_key_id"))
-            secret("Secret access key", text: draft.value("secret_access_key"))
+            inputField("HTTPS endpoint", text: draft.value("endpoint"), prompt: "https://….idrivee2-….com")
+            inputField("Access key ID", text: draft.value("access_key_id"))
+            secretField("Secret access key", text: draft.value("secret_access_key"))
             Text("Copy the endpoint shown for your bucket's region in the IDrive e2 dashboard.").font(.caption).foregroundStyle(.secondary)
         case .gcs:
             HStack {
@@ -451,27 +536,57 @@ struct AddStorageView: View {
             }
             Text("The service account needs access to the selected bucket. GCS is separate from your Google Drive subscription.").font(.caption).foregroundStyle(.secondary)
         case .azureBlob:
-            secret("Scoped SAS URL", text: draft.value("sas_url"))
+            secretField("Scoped SAS URL", text: draft.value("sas_url"))
             Text("Use a SAS URL granting the access you want for this container. Read-only mounts still need read/list permissions.").font(.caption).foregroundStyle(.secondary)
         case .other: EmptyView()
         }
     }
-    private func field(_ title: String, text: Binding<String>, prompt: String = "") -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.system(size: 12, weight: .medium))
-            TextField(prompt, text: text).textFieldStyle(.plain).font(.system(size: 13)).padding(12)
-                .background(ShelfTheme.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(ShelfTheme.ink.opacity(0.12)))
-                .accessibilityLabel(title)
-        }
-    }
-    private func secret(_ title: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.system(size: 12, weight: .medium))
-            SecureField(title, text: text).textFieldStyle(.plain).font(.system(size: 13)).padding(12)
-                .background(ShelfTheme.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(ShelfTheme.ink.opacity(0.12)))
-                .accessibilityLabel(title)
-        }
+}
+
+struct EditStorageView: View {
+    @ObservedObject var manager: DriveManager
+    let storage: Storage
+    @StateObject private var draft = ConnectionDraft()
+    private var canReplaceCredentials: Bool { storage.ownConfig && storage.provider.isObjectStorage }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                ProviderBadge(provider: storage.provider, size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Edit details").font(.system(size: 18, weight: .semibold, design: .rounded))
+                    Text(storage.provider.title).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
+                }
+            }
+            ScrollView {
+                VStack(spacing: 16) {
+                    ShelfSection(title: "Space", subtitle: "Changes apply the next time this drive is mounted.") {
+                        inputField("Space name", text: $draft.name)
+                        inputField(storage.provider.isObjectStorage ? "Bucket or container / optional prefix" : "Folder path (optional)", text: $draft.root, prompt: storage.provider.isObjectStorage ? "my-bucket/footage" : "Leave blank for the account root")
+                        Toggle("Read-only", isOn: $draft.readOnly)
+                        if storage.provider == .googleDrive && !storage.readOnly {
+                            Text("This account may have been signed in with read-only access. If saving fails to write, use Reconnect.").font(.caption).foregroundStyle(ShelfTheme.muted)
+                        }
+                        Toggle("Mount automatically at login", isOn: $draft.autoMount)
+                        if storage.provider.prefersArchive {
+                            Toggle("Archive mode (avoid repeated downloads)", isOn: $draft.archive)
+                        }
+                    }
+                    if canReplaceCredentials {
+                        ShelfSection(title: "Credentials", subtitle: "Saved credentials are never shown. Replace them to rotate keys.") {
+                            Toggle("Replace credentials", isOn: $draft.replacingCredentials)
+                            if draft.replacingCredentials { ProviderFields(draft: draft) }
+                        }
+                    }
+                }
+            }
+            if let message = draft.message { Text(message).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                Spacer()
+                Button("Cancel") { manager.spaceToEdit = nil }.buttonStyle(ShelfButtonStyle())
+                Button(draft.working ? "Saving…" : "Save") { Task { await draft.saveEdits(manager, original: storage) } }
+                    .buttonStyle(ShelfButtonStyle(prominent: true)).disabled(draft.working)
+            }
+        }.padding(26).frame(width: 520, height: 600).background(ShelfTheme.paper)
+            .onAppear { draft.load(from: storage) }
     }
 }

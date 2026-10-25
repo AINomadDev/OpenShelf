@@ -49,11 +49,13 @@ final class DriveManager: ObservableObject {
         NSPasteboard.general.setString(storage.mountPoint(home: home).path, forType: .string)
     }
     @Published var spaceToRemove: Storage?
+    @Published var spaceToEdit: Storage?
     @Published var archiveToOpen: Storage?
     private var store: ConnectionStore { ConnectionStore(home: home) }
     private var usageStore: UsageStore { UsageStore(home: home) }
     init() {
         if Self.isPreview { loadPreviewData(); return }
+        LegacyMigration.run(home: home)
         do { connections = try store.load() }
         catch { notice = error.localizedDescription }
         usage = usageStore.load()
@@ -88,6 +90,24 @@ final class DriveManager: ObservableObject {
             try store.save(updated); connections = updated
             if mounted.contains(storage) { statuses[storage] = "Mode applies the next time this drive is mounted." }
         } catch { notice = "Could not save the access mode." }
+    }
+    var canEdit: (Storage) -> Bool { { [self] in !mounted.contains($0) && !isRunning($0) && !busy.contains($0) } }
+    func replace(_ old: Storage, with new: Storage) throws {
+        guard canEdit(old), let index = connections.firstIndex(of: old) else { throw StorageError.busy }
+        var updated = connections
+        updated[index] = new
+        try store.save(updated)
+        connections = updated
+        if old.directory != new.directory {
+            let oldFolder = old.mountPoint(home: home)
+            if (try? FileManager.default.contentsOfDirectory(atPath: oldFolder.path))?.isEmpty == true { try? FileManager.default.removeItem(at: oldFolder) }
+        }
+        if old.root != new.root || old.remote != new.remote {
+            usage[new.id] = nil
+            usageStore.save(usage)
+            forceUsage.insert(new.id)
+        }
+        statuses[new] = nil
     }
     func setAutoMount(_ storage: Storage, enabled: Bool) {
         guard let index = connections.firstIndex(of: storage) else { return }
@@ -264,8 +284,9 @@ final class DriveManager: ObservableObject {
     func cleanJunk(_ storage: Storage) {
         guard !Self.isPreview, !busy.contains(storage), let binary = rclone else { return }
         busy.insert(storage)
+        let arguments = storage.junkCleanupArguments(home: home)
         Task { [weak self] in
-            let result = try? await runCommand(binary, storage.junkCleanupArguments(home: home), timeoutSeconds: 1800)
+            let result = try? await runCommand(binary, arguments, timeoutSeconds: 1800)
             guard let self else { return }
             self.busy.remove(storage)
             if result?.code == 0 {
@@ -279,6 +300,11 @@ final class DriveManager: ObservableObject {
     }
     func refreshUsage(_ storage: Storage) {
         guard !Self.isPreview, !usageRefreshing.contains(storage.id), let binary = rclone else { return }
+        guard storage.provider.reportsQuota else {
+            usage[storage.id] = .unreported()
+            usageStore.save(usage)
+            return
+        }
         usageRefreshing.insert(storage.id)
         lastUsageAttempt[storage.id] = Date()
         forceUsage.remove(storage.id)
@@ -287,6 +313,13 @@ final class DriveManager: ObservableObject {
             let result = try? await runCommand(binary, args, timeoutSeconds: 600)
             guard let self else { return }
             self.usageRefreshing.remove(storage.id)
+            if let result, result.code == 0, !storage.provider.isObjectStorage,
+               StorageUsage.fromAbout(result.output) == nil,
+               (try? JSONSerialization.jsonObject(with: result.output)) is [String: Any] {
+                self.usage[storage.id] = .unreported()
+                self.usageStore.save(self.usage)
+                return
+            }
             guard let result, result.code == 0,
                   let value = storage.provider.isObjectStorage ? StorageUsage.fromSize(result.output) : StorageUsage.fromAbout(result.output) else { return }
             self.usage[storage.id] = value

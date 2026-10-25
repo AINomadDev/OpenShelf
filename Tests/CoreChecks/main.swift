@@ -160,3 +160,33 @@ print("PASS: guided setup content and endpoint normalisation")
 
 let junk = try Storage.make(provider: .cloudflareR2, title: "Junk", root: "bucket", existing: [], readOnly: false, autoMount: false).junkCleanupArguments(home: home)
 precondition(junk.first == "delete" && junk.contains("._*") && junk.contains(".DS_Store") && !junk.contains("--rmdirs"))
+
+precondition(!Provider.iCloud.reportsQuota && Provider.googleDrive.reportsQuota)
+let unreported = StorageUsage.unreported()
+precondition(!unreported.isReported && Storage.googleDrive.quota(for: unreported) == nil)
+precondition(Storage.googleDrive.quota(for: StorageUsage(usedBytes: 1, totalBytes: 10, objects: nil, updated: Date(), unsupported: nil))?.remaining == 9)
+let legacyHome = FileManager.default.temporaryDirectory.appendingPathComponent("os-mig-\(UUID().uuidString)")
+for rel in LegacyMigration.locations {
+    let base = rel.isEmpty ? legacyHome : legacyHome.appendingPathComponent(rel)
+    try FileManager.default.createDirectory(at: base.appendingPathComponent("CloudShelf/keep"), withIntermediateDirectories: true)
+}
+precondition(LegacyMigration.run(home: legacyHome, mountPaths: [legacyHome.path + "/CloudShelf/Google Drive"]) == 3, "mounted home folder is skipped, others move")
+precondition(FileManager.default.fileExists(atPath: legacyHome.appendingPathComponent("CloudShelf/keep").path))
+precondition(FileManager.default.fileExists(atPath: legacyHome.appendingPathComponent("Library/Caches/OpenShelf/keep").path))
+precondition(LegacyMigration.run(home: legacyHome, mountPaths: []) == 1 && FileManager.default.fileExists(atPath: legacyHome.appendingPathComponent("OpenShelf/keep").path))
+try? FileManager.default.removeItem(at: legacyHome)
+print("PASS: unreported quota handling and legacy folder migration")
+
+do {
+    let r2 = try Storage.make(provider: .cloudflareR2, title: "Photos", root: "bucket", existing: [], readOnly: false, autoMount: true)
+    let edited = try r2.updating(title: " Family ", root: "/bucket/2024/", readOnly: true, autoMount: false, mode: .live, existing: [r2])
+    precondition(edited.id == r2.id && edited.port == r2.port && edited.remote == r2.remote && edited.cacheKey == r2.cacheKey)
+    precondition(edited.title == "Family" && edited.root == "bucket/2024" && edited.readOnly && !edited.autoMount && !edited.isArchive)
+    precondition(edited.directory == "Family · " + String(r2.id.prefix(8)))
+    for bad in [("", "bucket"), ("a/b", "bucket"), ("ok", ""), ("ok", "a/../b")] {
+        precondition((try? r2.updating(title: bad.0, root: bad.1, readOnly: false, autoMount: true, mode: .archive, existing: [r2])) == nil)
+    }
+    let drive = try Storage.googleDrive.updating(title: "Work", root: "", readOnly: false, autoMount: true, mode: .archive, existing: [])
+    precondition(drive.directory == "Google Drive" && drive.title == "Work" && !drive.isArchive && drive.remote == "cloudshelf-google")
+    print("PASS: editing connection details keeps identity, validates input, and keeps built-in folders")
+}

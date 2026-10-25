@@ -2,6 +2,7 @@ const call = (c, a) => window.__TAURI__.core.invoke(c, a);
 const $ = (id) => document.getElementById(id);
 const fmt = (b) => b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : b >= 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.round(b / 1e3) + ' KB';
 let catalogue = [];
+let editing = null;
 const show = (e) => { $('err').textContent = e ? String(e) : ''; };
 const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const act = (fn) => async () => { try { show(''); await fn(); } catch (e) { show(e); } await render(); };
@@ -19,6 +20,7 @@ async function render() {
     row.append(v.running ? btn('Open', () => call('open_folder', { id: s.id }), true) : el('span'),
       v.running ? btn('Disconnect', () => call('stop_space', { id: s.id })) : btn('Connect', () => call('start_space', { id: s.id })),
       btn('Refresh usage', async () => { await call('refresh_usage', { id: s.id, force: true }); }, true));
+    if (!v.running) row.append(btn('Edit', () => openEdit(v), true));
     if (!v.running) row.append(btn('Clean junk files', () => call('clean_junk', { id: s.id }), true));
     if (!v.running) row.append(btn('Remove', () => call('remove_space', { id: s.id }), true));
     card.append(row);
@@ -45,14 +47,22 @@ function fillProvider() {
   $('archive').checked = true;
 }
 
-$('add').onclick = () => { $('form').reset(); fillProvider(); $('dlg').showModal(); };
+function openEdit(v) {
+  editing = v.space; $('form').reset(); $('prov').value = editing.provider; fillProvider();
+  $('dtitle').textContent = 'Edit ' + editing.title; $('prov').disabled = true;
+  $('title').value = editing.title; $('root').value = editing.root; $('ro').checked = editing.read_only; $('archive').checked = editing.archive;
+  document.querySelectorAll('#fields input').forEach((i) => { i.required = false; i.placeholder = 'Leave blank to keep saved credentials'; });
+  $('dlg').showModal();
+}
+$('add').onclick = () => { editing = null; $('prov').disabled = false; $('dtitle').textContent = 'Add storage'; $('form').reset(); fillProvider(); $('dlg').showModal(); };
 $('prov').onchange = fillProvider;
 $('console').onclick = () => call('open_url', { url: catalogue.find((x) => x.id === $('prov').value).console_url }).catch(show);
 $('form').addEventListener('submit', async (ev) => {
   if (ev.submitter.value !== 'ok') return;
   const fields = {}; document.querySelectorAll('#fields input').forEach((i) => { fields[i.dataset.key] = i.value; });
   try {
-    await call('add_space', { provider: $('prov').value, title: $('title').value, root: $('root').value, readOnly: $('ro').checked, archive: $('archive').checked, fields });
+    const args = { title: $('title').value, root: $('root').value, readOnly: $('ro').checked, archive: $('archive').checked, fields };
+    if (editing) await call('update_space', { id: editing.id, ...args }); else await call('add_space', { provider: $('prov').value, ...args });
     show('');
   } catch (e) { show(e); }
   await render();

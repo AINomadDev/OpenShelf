@@ -55,6 +55,8 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
     // Egress-priced object storage is treated as an archive by default.
     var prefersArchive: Bool { isObjectStorage }
     // Free allowance advertised by pay-as-you-go archive providers; nil when there is no fixed allowance.
+    // iCloud Drive exposes no storage-info call; Google Shared Drives report none either (detected at refresh time).
+    var reportsQuota: Bool { self != .iCloud }
     var freeTierBytes: Int64? { [.cloudflareR2, .backblazeB2, .idriveE2].contains(self) ? 10_000_000_000 : nil }
     // Providers where reading data back can produce a surprise bill.
     var chargesEgress: Bool { [.s3, .gcs, .azureBlob, .s3Compatible].contains(self) }
@@ -102,6 +104,10 @@ struct StorageUsage: Codable, Equatable {
     var totalBytes: Int64?
     var objects: Int64?
     var updated: Date
+    // True when the provider answered but does not report a quota for this space.
+    var unsupported: Bool?
+    static func unreported(now: Date = Date()) -> StorageUsage { StorageUsage(usedBytes: 0, totalBytes: nil, objects: nil, updated: now, unsupported: true) }
+    var isReported: Bool { unsupported != true }
 }
 
 enum QuotaLevel { case unlimited, ok, warning, exceeded }
@@ -127,7 +133,7 @@ extension StorageUsage {
     static func fromSize(_ data: Data, now: Date = Date()) -> StorageUsage? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let bytes = (object["bytes"] as? NSNumber)?.int64Value else { return nil }
-        return StorageUsage(usedBytes: bytes, totalBytes: nil, objects: (object["count"] as? NSNumber)?.int64Value, updated: now)
+        return StorageUsage(usedBytes: bytes, totalBytes: nil, objects: (object["count"] as? NSNumber)?.int64Value, updated: now, unsupported: nil)
     }
     static func fromAbout(_ data: Data, now: Date = Date()) -> StorageUsage? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -135,7 +141,7 @@ extension StorageUsage {
         var used = (object["used"] as? NSNumber)?.int64Value
         if used == nil, let total, let free = (object["free"] as? NSNumber)?.int64Value { used = total - free }
         guard let used else { return nil }
-        return StorageUsage(usedBytes: used, totalBytes: total, objects: nil, updated: now)
+        return StorageUsage(usedBytes: used, totalBytes: total, objects: nil, updated: now, unsupported: nil)
     }
 }
 
@@ -157,23 +163,23 @@ struct UsageStore {
 struct Storage: Codable, Identifiable, Hashable {
     let id: String
     let provider: Provider
-    let title: String
+    var title: String
     let remote: String
     let backend: String
-    let root: String
-    let directory: String
+    var root: String
+    var directory: String
     let cacheKey: String
     let port: Int
     let ownConfig: Bool
     var autoMount: Bool
-    let readOnly: Bool
+    var readOnly: Bool
     var mode: AccessMode
     static let googleDrive = Storage(id: "googleDrive", provider: .googleDrive, title: "Google Drive", remote: "cloudshelf-google", backend: "drive", root: "", directory: "Google Drive", cacheKey: "googleDrive", port: 55731, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let iCloud = Storage(id: "iCloud", provider: .iCloud, title: "iCloud Drive", remote: "cloudshelf-icloud", backend: "iclouddrive", root: "", directory: "iCloud Drive", cacheKey: "iCloud", port: 55732, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let legacy: [Storage] = [.googleDrive, .iCloud]
     enum CodingKeys: String, CodingKey { case id, provider, title, remote, backend, root, directory, cacheKey, port, ownConfig, autoMount, readOnly, mode }
     func quota(for usage: StorageUsage?) -> QuotaStatus? {
-        guard let usage else { return nil }
+        guard let usage, usage.isReported else { return nil }
         return QuotaStatus(used: usage.usedBytes, limit: usage.totalBytes ?? provider.freeTierBytes)
     }
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
@@ -221,6 +227,24 @@ struct Storage: Codable, Identifiable, Hashable {
 }
 
 extension Storage {
+    /// Returns a copy with edited details. Identity, ports, caches and credentials stay the same.
+    func updating(title newTitle: String, root newRoot: String, readOnly: Bool, autoMount: Bool, mode: AccessMode, existing: [Storage]) throws -> Storage {
+        let label = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty, label.count <= 80, !label.contains("/"), !label.contains(":"), !label.contains(where: { $0.isNewline }) else { throw StorageError.invalidName }
+        guard !newRoot.contains(where: { $0.isNewline }), !newRoot.split(separator: "/").contains("..") else { throw StorageError.invalidRoot }
+        let cleanRoot = newRoot.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if provider.isObjectStorage && cleanRoot.isEmpty { throw StorageError.invalidRoot }
+        var copy = self
+        copy.title = label
+        copy.root = cleanRoot
+        copy.readOnly = readOnly
+        copy.autoMount = autoMount
+        copy.mode = provider.prefersArchive ? mode : .live
+        // The two built-in accounts keep their fixed Finder folder names.
+        if !Storage.legacy.contains(where: { $0.id == id }) { copy.directory = label + " · " + String(id.prefix(8)) }
+        if copy.directory != directory, existing.contains(where: { $0.id != id && $0.directory == copy.directory }) { throw StorageError.invalidName }
+        return copy
+    }
     // Manifests written before archive mode existed gain a mode without touching other fields.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -256,11 +280,12 @@ enum EndpointInput {
 }
 
 enum StorageError: LocalizedError {
-    case invalidName, invalidRoot, noPort, invalidManifest
+    case invalidName, invalidRoot, noPort, invalidManifest, busy
     var errorDescription: String? {
         switch self {
         case .invalidName: return "Choose a name of 1–80 characters without slashes, colons, or line breaks."
         case .invalidRoot: return "Use a folder, bucket, or container path without parent traversal or line breaks."
+        case .busy: return "Disconnect this space before editing it."
         case .noPort: return "No free account control endpoint is available."
         case .invalidManifest: return "Saved connections could not be loaded safely. Your cloud files and credentials have not been changed."
         }
@@ -374,5 +399,38 @@ struct GoogleAuthorization {
         let token = String(text[start.upperBound..<end.lowerBound])
         guard let json = try JSONSerialization.jsonObject(with: Data(token.utf8)) as? [String: Any], json["access_token"] as? String != nil else { throw CocoaError(.coderReadCorrupt) }
         return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+    }
+}
+
+
+// Moves folders created under the earlier "CloudShelf" name to "OpenShelf" once nothing is mounted from them.
+enum LegacyMigration {
+    static let locations = ["", "Library/Application Support", "Library/Caches", "Library/Logs"]
+    static func activeMountPaths() -> [String] {
+        let process = Process(), pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/sbin/mount")
+        process.standardOutput = pipe
+        guard (try? process.run()) != nil else { return [] }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        return output.split(separator: "\n").compactMap { line in
+            guard let on = line.range(of: " on "), let end = line.range(of: " (", range: on.upperBound..<line.endIndex) else { return nil }
+            return String(line[on.upperBound..<end.lowerBound])
+        }
+    }
+    /// Returns the number of folders moved. Skips any location that still has a mount inside it or already has a new-name folder.
+    @discardableResult
+    static func run(home: URL, mountPaths: [String] = activeMountPaths()) -> Int {
+        let fm = FileManager.default
+        var moved = 0
+        for relative in locations {
+            let base = relative.isEmpty ? home : home.appendingPathComponent(relative, isDirectory: true)
+            let old = base.appendingPathComponent("CloudShelf", isDirectory: true)
+            let new = base.appendingPathComponent("OpenShelf", isDirectory: true)
+            guard fm.fileExists(atPath: old.path), !fm.fileExists(atPath: new.path) else { continue }
+            if mountPaths.contains(where: { $0 == old.path || $0.hasPrefix(old.path + "/") }) { continue }
+            if (try? fm.moveItem(at: old, to: new)) != nil { moved += 1 }
+        }
+        return moved
     }
 }

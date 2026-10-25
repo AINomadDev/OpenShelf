@@ -103,6 +103,13 @@ Normal quit/logout requests try to unmount idle drives before exiting. Open file
 
 Core checks cover preserved legacy paths, multiple accounts of the same provider, distinct caches/configs/ports, read-only engine flags, manifest persistence, duplicate/corrupt manifest refusal, and OAuth output parsing. Provider setup fields were checked against the bundled engine schema. Live testing for newly added AWS, GCS, Azure, and S3-compatible services requires credentials and has not been completed. A real second Google identity also requires its own browser authorization before it can be claimed verified.
 
+## Editing and quota notes
+
+- Use **Edit details…** in a card menu (or **Edit** in the desktop app) to change the name, bucket or folder, read-only, auto-mount and archive mode. You can also replace object-storage credentials; saved secrets are never displayed, and the old ones are restored if the new ones fail the access test. Disconnect the space first.
+- Google Drive and iCloud: iCloud Drive and Google *Shared Drives* do not report a storage total, so the dashboard says "not reported". Personal My Drive accounts show used and remaining space.
+
+Run `./run.sh` (macOS/Linux) or `run.cmd` (Windows) to start the right app for your OS.
+
 ## Windows and Linux (preview)
 
 `desktop/` contains a Tauri app with the same model: bring-your-own storage, archive mode, free-tier usage, and drives that run as detached rclone processes so uploads survive closing the app.
