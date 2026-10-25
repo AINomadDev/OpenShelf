@@ -108,6 +108,10 @@ Core checks cover preserved legacy paths, multiple accounts of the same provider
 - Use **Edit details…** in a card menu (or **Edit** in the desktop app) to change the name, bucket or folder, read-only, auto-mount and archive mode. You can also replace object-storage credentials; saved secrets are never displayed, and the old ones are restored if the new ones fail the access test. Disconnect the space first.
 - Google Drive and iCloud: iCloud Drive and Google *Shared Drives* do not report a storage total, so the dashboard says "not reported". Personal My Drive accounts show used and remaining space.
 
+- **Account info and labels:** each card shows which account it belongs to (Google email and name, the iCloud Apple ID or phone number, the GCS service account, or the S3 endpoint host), plus your own tags and a note. Labels are searchable and can be edited even while a drive is mounted; name, location, access and credentials need the drive disconnected.
+- **Google Shared Drives** report no quota of their own, so OpenShelf shows your whole Google account's usage and limit instead (marked "whole Google account"). iCloud Drive offers no total; use **Measure size now** in the card menu to list files and total them (slow on large drives).
+- Account details are read in memory from your own rclone config and the Google Drive API; only the email, name or host is saved, never tokens or passwords.
+
 Run `./run.sh` (macOS/Linux) or `run.cmd` (Windows) to start the right app for your OS.
 
 ## Windows and Linux (preview)

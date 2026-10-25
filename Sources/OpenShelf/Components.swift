@@ -67,7 +67,14 @@ struct ShelfSection<Content: View>: View {
 enum UsageText {
     static func bytes(_ value: Int64) -> String { ByteCountFormatter.string(fromByteCount: value, countStyle: .file) }
     // One-line summary shared by the space card and the usage panel.
-    static func summary(_ quota: QuotaStatus, freeTier: Bool) -> String {
+    static func unreported(_ usage: StorageUsage?) -> String {
+        usage?.measured == true ? bytes(usage?.usedBytes ?? 0) + " stored · measured" : "Quota not reported"
+    }
+    static func summary(_ quota: QuotaStatus, freeTier: Bool, accountWide: Bool = false) -> String {
+        let suffix = accountWide ? " · whole Google account" : ""
+        return base(quota, freeTier: freeTier) + suffix
+    }
+    private static func base(_ quota: QuotaStatus, freeTier: Bool) -> String {
         guard let limit = quota.limit else { return bytes(quota.used) + " stored" }
         if quota.level == .exceeded {
             return freeTier ? "Free tier used up · \(bytes(quota.overage)) billed pay-as-you-go" : "Full · \(bytes(quota.used)) of \(bytes(limit))"

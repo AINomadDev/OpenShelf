@@ -190,3 +190,20 @@ do {
     precondition(drive.directory == "Google Drive" && drive.title == "Work" && !drive.isArchive && drive.remote == "cloudshelf-google")
     print("PASS: editing connection details keeps identity, validates input, and keeps built-in folders")
 }
+
+precondition(TagInput.parse(" Work, family ;work,, backup ") == ["Work", "family", "backup"])
+precondition(TagInput.parse((1...20).map(String.init).joined(separator: ",")).count == 8)
+let tagged = try Storage.make(provider: .backblazeB2, title: "Tagged", root: "b", existing: [], readOnly: false, autoMount: true)
+let labelled = try tagged.updating(title: tagged.title, root: tagged.root, readOnly: false, autoMount: true, mode: .archive, tags: ["x"], note: " hello ", existing: [tagged])
+precondition(labelled.tags == ["x"] && labelled.note == "hello" && labelled.directory == tagged.directory)
+let reloaded = try JSONDecoder().decode(Storage.self, from: JSONEncoder().encode(labelled))
+precondition(reloaded.tags == ["x"] && reloaded.note == "hello")
+let google = AccountIdentity.googleAbout(Data(#"{"user":{"emailAddress":"a@example.com","displayName":"A"},"storageQuota":{"limit":"2000","usage":"500"}}"#.utf8))
+precondition(google?.identity.email == "a@example.com" && google?.usage?.totalBytes == 2000 && google?.usage?.accountWide == true)
+precondition(Storage.googleDrive.quota(for: google?.usage)?.remaining == 1500)
+precondition(AccountIdentity.googleAbout(Data("{}".utf8)) == nil)
+precondition(AccountIdentity.from(provider: .iCloud, config: ["apple_id": "me@icloud.com", "password": "x"]).email == "me@icloud.com")
+precondition(AccountIdentity.from(provider: .cloudflareR2, config: ["endpoint": "https://abc.r2.cloudflarestorage.com"]).detail == "abc.r2.cloudflarestorage.com")
+var measuredUsage = StorageUsage.unreported(); measuredUsage.usedBytes = 42; measuredUsage.measured = true
+precondition(StorageUsage.unreported(previous: measuredUsage).usedBytes == 42 && StorageUsage.unreported().usedBytes == 0)
+print("PASS: tags/notes, account identity parsing, Google account quota, measured sizes")

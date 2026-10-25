@@ -18,6 +18,8 @@ final class ConnectionDraft: ObservableObject {
     @Published var working = false
     @Published var message: String?
     @Published var replacingCredentials = false
+    @Published var tagsText = ""
+    @Published var note = ""
     private var authProcess: Process?
     private var cancelled = false
     private let home = FileManager.default.homeDirectoryForCurrentUser
@@ -167,6 +169,8 @@ final class ConnectionDraft: ObservableObject {
         autoMount = storage.autoMount
         archive = storage.isArchive
         replacingCredentials = false
+        tagsText = storage.tags.joined(separator: ", ")
+        note = storage.note
         fields = [:]
         message = nil
     }
@@ -179,7 +183,15 @@ final class ConnectionDraft: ObservableObject {
         let configURL = original.configURL(home: home)
         let previousConfig = try? Data(contentsOf: configURL)
         do {
-            let updated = try original.updating(title: name, root: root, readOnly: readOnly, autoMount: autoMount, mode: archive ? .archive : .live, existing: manager.connections)
+            let tags = TagInput.parse(tagsText)
+            // A mounted drive keeps its name, path, access and credentials; only labels, auto-mount and mode can change.
+            if !manager.canEdit(original) {
+                let live = try original.updating(title: original.title, root: original.root, readOnly: original.readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, existing: manager.connections)
+                try manager.applyLiveEdit(original, with: live)
+                manager.spaceToEdit = nil
+                return
+            }
+            let updated = try original.updating(title: name, root: root, readOnly: readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, existing: manager.connections)
             let replacing = replacingCredentials && original.ownConfig && original.provider.isObjectStorage
             if replacing {
                 provider = original.provider
@@ -548,6 +560,7 @@ struct EditStorageView: View {
     let storage: Storage
     @StateObject private var draft = ConnectionDraft()
     private var canReplaceCredentials: Bool { storage.ownConfig && storage.provider.isObjectStorage }
+    private var locked: Bool { !manager.canEdit(storage) }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
@@ -559,10 +572,16 @@ struct EditStorageView: View {
             }
             ScrollView {
                 VStack(spacing: 16) {
-                    ShelfSection(title: "Space", subtitle: "Changes apply the next time this drive is mounted.") {
-                        inputField("Space name", text: $draft.name)
-                        inputField(storage.provider.isObjectStorage ? "Bucket or container / optional prefix" : "Folder path (optional)", text: $draft.root, prompt: storage.provider.isObjectStorage ? "my-bucket/footage" : "Leave blank for the account root")
-                        Toggle("Read-only", isOn: $draft.readOnly)
+                    ShelfSection(title: "Labels", subtitle: "Shown on the card and searchable. Safe to change any time.") {
+                        inputField("Tags (comma separated)", text: $draft.tagsText, prompt: "work, family, backup")
+                        inputField("Note", text: $draft.note, prompt: "What is this space for?")
+                    }
+                    ShelfSection(title: "Space", subtitle: locked ? "Disconnect this drive to change its name, location, access or credentials." : "Changes apply the next time this drive is mounted.") {
+                        Group {
+                            inputField("Space name", text: $draft.name)
+                            inputField(storage.provider.isObjectStorage ? "Bucket or container / optional prefix" : "Folder path (optional)", text: $draft.root, prompt: storage.provider.isObjectStorage ? "my-bucket/footage" : "Leave blank for the account root")
+                            Toggle("Read-only", isOn: $draft.readOnly)
+                        }.disabled(locked).opacity(locked ? 0.55 : 1)
                         if storage.provider == .googleDrive && !storage.readOnly {
                             Text("This account may have been signed in with read-only access. If saving fails to write, use Reconnect.").font(.caption).foregroundStyle(ShelfTheme.muted)
                         }
@@ -571,7 +590,7 @@ struct EditStorageView: View {
                             Toggle("Archive mode (avoid repeated downloads)", isOn: $draft.archive)
                         }
                     }
-                    if canReplaceCredentials {
+                    if canReplaceCredentials && !locked {
                         ShelfSection(title: "Credentials", subtitle: "Saved credentials are never shown. Replace them to rotate keys.") {
                             Toggle("Replace credentials", isOn: $draft.replacingCredentials)
                             if draft.replacingCredentials { ProviderFields(draft: draft) }

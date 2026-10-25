@@ -106,7 +106,16 @@ struct StorageUsage: Codable, Equatable {
     var updated: Date
     // True when the provider answered but does not report a quota for this space.
     var unsupported: Bool?
-    static func unreported(now: Date = Date()) -> StorageUsage { StorageUsage(usedBytes: 0, totalBytes: nil, objects: nil, updated: now, unsupported: true) }
+    // Totals of the whole Google account (Drive, Gmail, Photos), used when a Shared Drive reports no quota of its own.
+    var accountWide: Bool?
+    // A size obtained by listing every file, for providers that report no quota.
+    var measured: Bool?
+    /// Keeps an earlier measured size when a later quota probe still reports nothing.
+    static func unreported(now: Date = Date(), previous: StorageUsage? = nil) -> StorageUsage {
+        var value = StorageUsage(usedBytes: 0, totalBytes: nil, objects: nil, updated: now, unsupported: true)
+        if let previous, previous.measured == true { value.usedBytes = previous.usedBytes; value.objects = previous.objects; value.measured = true }
+        return value
+    }
     var isReported: Bool { unsupported != true }
 }
 
@@ -174,10 +183,13 @@ struct Storage: Codable, Identifiable, Hashable {
     var autoMount: Bool
     var readOnly: Bool
     var mode: AccessMode
+    // Display-only labels; safe to change while a drive is mounted.
+    var tags: [String] = []
+    var note: String = ""
     static let googleDrive = Storage(id: "googleDrive", provider: .googleDrive, title: "Google Drive", remote: "cloudshelf-google", backend: "drive", root: "", directory: "Google Drive", cacheKey: "googleDrive", port: 55731, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let iCloud = Storage(id: "iCloud", provider: .iCloud, title: "iCloud Drive", remote: "cloudshelf-icloud", backend: "iclouddrive", root: "", directory: "iCloud Drive", cacheKey: "iCloud", port: 55732, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let legacy: [Storage] = [.googleDrive, .iCloud]
-    enum CodingKeys: String, CodingKey { case id, provider, title, remote, backend, root, directory, cacheKey, port, ownConfig, autoMount, readOnly, mode }
+    enum CodingKeys: String, CodingKey { case id, provider, title, remote, backend, root, directory, cacheKey, port, ownConfig, autoMount, readOnly, mode, tags, note }
     func quota(for usage: StorageUsage?) -> QuotaStatus? {
         guard let usage, usage.isReported else { return nil }
         return QuotaStatus(used: usage.usedBytes, limit: usage.totalBytes ?? provider.freeTierBytes)
@@ -228,7 +240,7 @@ struct Storage: Codable, Identifiable, Hashable {
 
 extension Storage {
     /// Returns a copy with edited details. Identity, ports, caches and credentials stay the same.
-    func updating(title newTitle: String, root newRoot: String, readOnly: Bool, autoMount: Bool, mode: AccessMode, existing: [Storage]) throws -> Storage {
+    func updating(title newTitle: String, root newRoot: String, readOnly: Bool, autoMount: Bool, mode: AccessMode, tags newTags: [String]? = nil, note newNote: String? = nil, existing: [Storage]) throws -> Storage {
         let label = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !label.isEmpty, label.count <= 80, !label.contains("/"), !label.contains(":"), !label.contains(where: { $0.isNewline }) else { throw StorageError.invalidName }
         guard !newRoot.contains(where: { $0.isNewline }), !newRoot.split(separator: "/").contains("..") else { throw StorageError.invalidRoot }
@@ -240,6 +252,8 @@ extension Storage {
         copy.readOnly = readOnly
         copy.autoMount = autoMount
         copy.mode = provider.prefersArchive ? mode : .live
+        if let newTags { copy.tags = newTags }
+        if let newNote { copy.note = String(newNote.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200)).replacingOccurrences(of: "\n", with: " ") }
         // The two built-in accounts keep their fixed Finder folder names.
         if !Storage.legacy.contains(where: { $0.id == id }) { copy.directory = label + " · " + String(id.prefix(8)) }
         if copy.directory != directory, existing.contains(where: { $0.id != id && $0.directory == copy.directory }) { throw StorageError.invalidName }
@@ -261,6 +275,8 @@ extension Storage {
         autoMount = try c.decode(Bool.self, forKey: .autoMount)
         readOnly = try c.decode(Bool.self, forKey: .readOnly)
         mode = try c.decodeIfPresent(AccessMode.self, forKey: .mode) ?? (provider.prefersArchive ? .archive : .live)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
     }
 }
 
@@ -432,5 +448,73 @@ enum LegacyMigration {
             if (try? fm.moveItem(at: old, to: new)) != nil { moved += 1 }
         }
         return moved
+    }
+}
+
+
+enum TagInput {
+    /// Comma-separated text to at most 8 unique tags of up to 24 characters.
+    static func parse(_ text: String) -> [String] {
+        var seen = Set<String>(), result: [String] = []
+        for part in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0.isNewline }) {
+            let tag = String(part.trimmingCharacters(in: .whitespaces).prefix(24))
+            if !tag.isEmpty, seen.insert(tag.lowercased()).inserted { result.append(tag) }
+            if result.count == 8 { break }
+        }
+        return result
+    }
+}
+
+// Who a connection belongs to. Nothing secret is stored: only an email, name or host.
+struct AccountIdentity: Codable, Equatable {
+    var email: String?
+    var name: String?
+    var detail: String?
+    var updated: Date
+    var headline: String? { email ?? detail }
+
+    /// `config` is the remote's rclone section; secrets in it are read in-process and never kept.
+    static func from(provider: Provider, config: [String: String], now: Date = Date()) -> AccountIdentity {
+        var identity = AccountIdentity(email: nil, name: nil, detail: nil, updated: now)
+        switch provider {
+        case .iCloud: identity.email = config["apple_id"]
+        case .gcs:
+            if let json = config["service_account_credentials"].flatMap({ try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }) {
+                identity.email = json["client_email"] as? String
+                identity.detail = json["project_id"].flatMap { $0 as? String }.map { "Project " + $0 }
+            }
+        case .azureBlob: identity.detail = config["sas_url"].flatMap { URL(string: $0)?.host }
+        case .backblazeB2: identity.detail = "Backblaze B2"
+        case .googleDrive, .other: break
+        default:
+            identity.detail = config["endpoint"].flatMap { URL(string: $0)?.host } ?? config["region"].map { "Region " + $0 }
+        }
+        return identity
+    }
+    /// Decodes the Drive v3 `about` response: signed-in user plus the account's storage quota.
+    static func googleAbout(_ data: Data, now: Date = Date()) -> (identity: AccountIdentity, usage: StorageUsage?)? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let user = object["user"] as? [String: Any], let email = user["emailAddress"] as? String else { return nil }
+        let identity = AccountIdentity(email: email, name: user["displayName"] as? String, detail: nil, updated: now)
+        var usage: StorageUsage?
+        if let quota = object["storageQuota"] as? [String: Any], let used = (quota["usage"] as? String).flatMap(Int64.init) {
+            usage = StorageUsage(usedBytes: used, totalBytes: (quota["limit"] as? String).flatMap(Int64.init), objects: nil, updated: now, accountWide: true)
+        }
+        return (identity, usage)
+    }
+}
+
+struct IdentityStore {
+    let home: URL
+    var url: URL { Storage.support(home: home).appendingPathComponent("accounts.json") }
+    func load() -> [String: AccountIdentity] {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([String: AccountIdentity].self, from: Data(contentsOf: url))) ?? [:]
+    }
+    func save(_ items: [String: AccountIdentity]) {
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(items) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? data.write(to: url, options: .atomic)
     }
 }

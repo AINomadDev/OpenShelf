@@ -40,7 +40,7 @@ final class DriveManager: ObservableObject {
         connections.filter { storage in
             (providerFilter == nil || storage.provider == providerFilter)
                 && (!mountedOnly || mounted.contains(storage))
-                && (searchText.isEmpty || [storage.title, storage.provider.title, storage.root].contains { $0.localizedCaseInsensitiveContains(searchText) })
+                && (searchText.isEmpty || ([storage.title, storage.provider.title, storage.root, storage.note, identities[storage.id]?.email ?? "", identities[storage.id]?.name ?? "", identities[storage.id]?.detail ?? ""] + storage.tags).contains { $0.localizedCaseInsensitiveContains(searchText) })
         }
     }
     func showAllSpaces() { searchText = ""; providerFilter = nil; mountedOnly = false }
@@ -53,12 +53,14 @@ final class DriveManager: ObservableObject {
     @Published var archiveToOpen: Storage?
     private var store: ConnectionStore { ConnectionStore(home: home) }
     private var usageStore: UsageStore { UsageStore(home: home) }
+    private var identityStore: IdentityStore { IdentityStore(home: home) }
     init() {
         if Self.isPreview { loadPreviewData(); return }
         LegacyMigration.run(home: home)
         do { connections = try store.load() }
         catch { notice = error.localizedDescription }
         usage = usageStore.load()
+        identities = identityStore.load()
     }
     func add(_ storage: Storage) throws {
         let updated = connections + [storage]
@@ -92,6 +94,15 @@ final class DriveManager: ObservableObject {
         } catch { notice = "Could not save the access mode." }
     }
     var canEdit: (Storage) -> Bool { { [self] in !mounted.contains($0) && !isRunning($0) && !busy.contains($0) } }
+    /// Saves tags, note, auto-mount and archive mode, which are safe to change while a drive is mounted.
+    func applyLiveEdit(_ old: Storage, with new: Storage) throws {
+        guard let index = connections.firstIndex(of: old) else { throw StorageError.busy }
+        var updated = connections
+        updated[index] = new
+        try store.save(updated)
+        connections = updated
+        if old.mode != new.mode, mounted.contains(old) { statuses[new] = "Mode applies the next time this drive is mounted." }
+    }
     func replace(_ old: Storage, with new: Storage) throws {
         guard canEdit(old), let index = connections.firstIndex(of: old) else { throw StorageError.busy }
         var updated = connections
@@ -122,6 +133,9 @@ final class DriveManager: ObservableObject {
     @Published var busy: Set<Storage> = []
     @Published var activity: [Storage: CacheActivity] = [:]
     @Published var usage: [String: StorageUsage] = [:]
+    @Published var identities: [String: AccountIdentity] = [:]
+    private var identityRefreshing: Set<String> = []
+    private var lastIdentityAttempt: [String: Date] = [:]
     @Published var usageRefreshing: Set<String> = []
     @Published var refreshing = false
     @Published var showingGuide = false
@@ -274,6 +288,7 @@ final class DriveManager: ObservableObject {
     private static let accountUsageTTL: TimeInterval = 1800
     private static let usageRetry: TimeInterval = 900
     private func refreshStaleUsage() {
+        refreshIdentities()
         for storage in connections where configured.contains(storage) && !usageRefreshing.contains(storage.id) {
             let ttl = storage.provider.isObjectStorage ? Self.objectUsageTTL : Self.accountUsageTTL
             let fresh = !forceUsage.contains(storage.id) && usage[storage.id].map { Date().timeIntervalSince($0.updated) < ttl } ?? false
@@ -298,10 +313,70 @@ final class DriveManager: ObservableObject {
             }
         }
     }
+    /// Lists every file to total a size for providers that report no quota; can take a long time on large drives.
+    func measureSize(_ storage: Storage) {
+        guard !Self.isPreview, !usageRefreshing.contains(storage.id), let binary = rclone else { return }
+        usageRefreshing.insert(storage.id)
+        let arguments = ["size", "--json", storage.remotePath] + storage.configArguments(home: home)
+        Task { [weak self] in
+            let result = try? await runCommand(binary, arguments, timeoutSeconds: 3600)
+            guard let self else { return }
+            self.usageRefreshing.remove(storage.id)
+            guard let result, result.code == 0, var value = StorageUsage.fromSize(result.output) else {
+                self.notice = "Could not measure the size of \(storage.title). Try again later."
+                return
+            }
+            value.unsupported = true
+            value.measured = true
+            self.usage[storage.id] = value
+            self.usageStore.save(self.usage)
+        }
+    }
+    private func refreshIdentities() {
+        guard !Self.isPreview, identityRefreshing.isEmpty, let binary = rclone else { return }
+        for storage in connections where configured.contains(storage) {
+            let known = identities[storage.id].map { $0.headline != nil && Date().timeIntervalSince($0.updated) < 7 * 86_400 } ?? false
+            let tried = lastIdentityAttempt[storage.id].map { $0.timeIntervalSinceNow > -900 } ?? false
+            if known || tried { continue }
+            lastIdentityAttempt[storage.id] = Date()
+            identityRefreshing.insert(storage.id)
+            let arguments = ["config", "dump"] + storage.configArguments(home: home)
+            Task { [weak self] in
+                let result = try? await runCommand(binary, arguments, timeoutSeconds: 30)
+                guard let self else { return }
+                defer { self.identityRefreshing.remove(storage.id) }
+                // The dump holds secrets: it is parsed in memory only and never logged or stored.
+                guard let result, result.code == 0,
+                      let all = try? JSONSerialization.jsonObject(with: result.output) as? [String: [String: String]],
+                      let section = all[storage.remote] else { return }
+                var identity = AccountIdentity.from(provider: storage.provider, config: section)
+                if storage.provider == .googleDrive, let google = await Self.googleAccount(token: section["token"]) {
+                    identity = google.identity
+                    if let account = google.usage, self.usage[storage.id]?.isReported != true || self.usage[storage.id]?.accountWide == true {
+                        self.usage[storage.id] = account
+                        self.usageStore.save(self.usage)
+                    }
+                }
+                guard identity.headline != nil || identity.name != nil else { return }
+                self.identities[storage.id] = identity
+                self.identityStore.save(self.identities)
+            }
+            return
+        }
+    }
+    private static func googleAccount(token: String?) async -> (identity: AccountIdentity, usage: StorageUsage?)? {
+        guard let token, let object = try? JSONSerialization.jsonObject(with: Data(token.utf8)) as? [String: Any],
+              let access = object["access_token"] as? String,
+              let url = URL(string: "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName),storageQuota(limit,usage)") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("Bearer " + access, forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return AccountIdentity.googleAbout(data)
+    }
     func refreshUsage(_ storage: Storage) {
         guard !Self.isPreview, !usageRefreshing.contains(storage.id), let binary = rclone else { return }
         guard storage.provider.reportsQuota else {
-            usage[storage.id] = .unreported()
+            usage[storage.id] = .unreported(previous: usage[storage.id])
             usageStore.save(usage)
             return
         }
@@ -316,7 +391,7 @@ final class DriveManager: ObservableObject {
             if let result, result.code == 0, !storage.provider.isObjectStorage,
                StorageUsage.fromAbout(result.output) == nil,
                (try? JSONSerialization.jsonObject(with: result.output)) is [String: Any] {
-                self.usage[storage.id] = .unreported()
+                if self.usage[storage.id]?.accountWide != true { self.usage[storage.id] = .unreported(previous: self.usage[storage.id]) }
                 self.usageStore.save(self.usage)
                 return
             }
