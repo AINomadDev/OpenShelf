@@ -22,6 +22,9 @@ final class ConnectionDraft: ObservableObject {
     @Published var budgetText = ""
     @Published var apiToken = ""
     @Published var removeToken = false
+    @Published var tokenStatus: String?
+    @Published var tokenOK = false
+    @Published var testingToken = false
     @Published var tagsText = ""
     @Published var ignoreText = ""
     @Published var note = ""
@@ -607,17 +610,45 @@ struct EditStorageView: View {
                     ShelfSection(title: "Account insights", subtitle: InsightSupport.info(storage.provider).title) {
                         Text(InsightSupport.info(storage.provider).detail).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
                         if storage.provider == .cloudflareR2 {
-                            if manager.hasCloudflareToken(storage) && !draft.removeToken {
+                            if manager.hasCloudflareToken(storage) {
                                 let sharing = manager.spacesInAccount(of: storage).count
-                                Label(sharing > 1 ? "A token is saved and shared by \(sharing) spaces in this Cloudflare account." : "A token is saved.", systemImage: "checkmark.seal").font(.system(size: 12))
-                                Toggle("Remove saved token", isOn: $draft.removeToken)
-                                if let error = manager.insightErrors[storage.id] {
-                                    Label(error, systemImage: "xmark.octagon").font(.system(size: 12)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                                }
+                                Label(draft.removeToken ? "The saved token will be removed when you press Save." : (sharing > 1 ? "A token is saved and shared by \(sharing) spaces in this Cloudflare account." : "A token is saved."), systemImage: draft.removeToken ? "trash" : "checkmark.seal").font(.system(size: 12))
+                                Toggle("Remove saved token on Save", isOn: $draft.removeToken)
                             } else {
                                 Label("No token yet. Usage comes from listing the bucket.", systemImage: "exclamationmark.circle").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
                             }
-                            secretField("API token (Account Analytics: Read)", text: $draft.apiToken)
+                            secretField("New API token (Account Analytics: Read)", text: $draft.apiToken)
+                            HStack(spacing: 10) {
+                                Button(draft.testingToken ? "Checking…" : "Verify and save token") {
+                                    let token = draft.apiToken
+                                    draft.testingToken = true; draft.tokenStatus = nil; draft.tokenOK = false
+                                    Task {
+                                        let problem = await manager.verifyCloudflareToken(token, for: storage)
+                                        if problem == nil {
+                                            do {
+                                                try manager.saveCloudflareToken(token, for: storage)
+                                                draft.apiToken = ""; draft.removeToken = false; draft.tokenOK = true
+                                                draft.tokenStatus = "Token works and is saved. Usage will refresh shortly."
+                                            } catch { draft.tokenStatus = error.localizedDescription }
+                                        } else { draft.tokenStatus = problem }
+                                        draft.testingToken = false
+                                    }
+                                }.buttonStyle(ShelfButtonStyle(prominent: false)).disabled(draft.testingToken || draft.apiToken.trimmingCharacters(in: .whitespaces).isEmpty)
+                                if manager.hasCloudflareToken(storage) && draft.apiToken.isEmpty {
+                                    Button("Test saved token") {
+                                        draft.testingToken = true; draft.tokenStatus = nil; draft.tokenOK = false
+                                        Task {
+                                            let problem = await manager.verifyCloudflareToken(nil, for: storage)
+                                            draft.tokenOK = problem == nil
+                                            draft.tokenStatus = problem ?? "The saved token works."
+                                            draft.testingToken = false
+                                        }
+                                    }.buttonStyle(ShelfButtonStyle(prominent: false)).disabled(draft.testingToken)
+                                }
+                            }
+                            if let status = draft.tokenStatus {
+                                Label(status, systemImage: draft.tokenOK ? "checkmark.circle.fill" : "xmark.octagon").font(.system(size: 12)).foregroundStyle(draft.tokenOK ? Color.green : Color.red).fixedSize(horizontal: false, vertical: true)
+                            }
                             Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read, with Account Resources set to your account. Paste the token value (not the Token ID). It is stored once per Cloudflare account in an owner-only file and only sent to api.cloudflare.com.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -658,7 +689,7 @@ struct EditStorageView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { manager.spaceToEdit = nil }.buttonStyle(ShelfButtonStyle())
-                Button(draft.working ? "Saving…" : "Save") { manager.setBudget(Double(draft.budgetText.trimmingCharacters(in: .whitespaces)), for: storage); if storage.provider == .cloudflareR2 { if draft.removeToken { try? manager.saveCloudflareToken("", for: storage) } else if !draft.apiToken.isEmpty { do { try manager.saveCloudflareToken(draft.apiToken, for: storage) } catch { draft.message = error.localizedDescription; return } } }; Task { await draft.saveEdits(manager, original: storage) } }
+                Button(draft.working ? "Saving…" : "Save") { if storage.provider == .cloudflareR2, !draft.apiToken.trimmingCharacters(in: .whitespaces).isEmpty { draft.tokenOK = false; draft.tokenStatus = "You typed a token but have not verified it. Press Verify and save token first."; return }; manager.setBudget(Double(draft.budgetText.trimmingCharacters(in: .whitespaces)), for: storage); if storage.provider == .cloudflareR2, draft.removeToken, draft.apiToken.isEmpty { manager.removeCloudflareToken(for: storage) }; Task { await draft.saveEdits(manager, original: storage) } }
                     .buttonStyle(ShelfButtonStyle(prominent: true)).disabled(draft.working)
             }
         }.padding(26).frame(width: 520, height: 600).background(ShelfTheme.paper)

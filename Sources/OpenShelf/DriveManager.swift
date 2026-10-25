@@ -678,6 +678,20 @@ final class DriveManager: ObservableObject {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         for space in spacesInAccount(of: storage) { forceUsage.insert(space.id); lastUsageAttempt[space.id] = nil }
     }
+    /// Checks a token against Cloudflare for this space's account and bucket. Returns nil when it works, otherwise what to fix.
+    func verifyCloudflareToken(_ token: String?, for storage: Storage) async -> String? {
+        let clean = (token ?? tokenURL(for: storage).flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return "Paste a token first." }
+        guard !clean.contains("\n"), clean.count < 400 else { return "That does not look like a Cloudflare API token." }
+        guard let text = try? String(contentsOf: storage.configURL(home: home), encoding: .utf8),
+              let account = R2Analytics.accountID(fromHost: CredentialHealth.configValue("endpoint", in: text).flatMap { URL(string: $0)?.host }),
+              let bucket = R2Analytics.bucket(of: storage.root) else { return "This space has no Cloudflare R2 endpoint or bucket to check." }
+        let result = try? await URLSession.shared.data(for: R2Analytics.request(token: clean, account: account, bucket: bucket))
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode
+        guard let data = result?.0, status == 200, R2Analytics.parse(data) != nil else { return R2Analytics.failureReason(status: status, data: result?.0) }
+        return nil
+    }
+    func removeCloudflareToken(for storage: Storage) { try? saveCloudflareToken("", for: storage) }
     func hasCloudflareToken(_ storage: Storage) -> Bool { tokenURL(for: storage) != nil }
     /// Spaces that use the same provider account (and therefore the same token), including this one.
     func spacesInAccount(of storage: Storage) -> [Storage] {
