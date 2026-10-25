@@ -74,6 +74,24 @@
       "pricePerGb": 0.02
     },
     {
+      "id": "hetzner",
+      "title": "Hetzner Object Storage",
+      "backend": "s3",
+      "s3Flavor": "Hetzner",
+      "freeTierBytes": null,
+      "chargesEgress": false,
+      "pricePerGb": 0.0065
+    },
+    {
+      "id": "storj",
+      "title": "Storj",
+      "backend": "s3",
+      "s3Flavor": "Storj",
+      "freeTierBytes": null,
+      "chargesEgress": true,
+      "pricePerGb": 0.004
+    },
+    {
       "id": "s3c",
       "title": "S3-compatible storage",
       "backend": "s3",

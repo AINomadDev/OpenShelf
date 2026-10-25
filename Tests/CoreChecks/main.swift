@@ -337,7 +337,7 @@ do {
     struct Entry: Decodable { let id: String; let title: String; let backend: String; let s3Flavor: String?; let freeTierBytes: Int64?; let chargesEgress: Bool; let pricePerGb: Double? }
     struct Catalogue: Decodable { let providers: [Entry] }
     let catalogue = try JSONDecoder().decode(Catalogue.self, from: Data(contentsOf: URL(fileURLWithPath: "providers.json")))
-    let byID: [String: Provider] = ["r2": .cloudflareR2, "b2": .backblazeB2, "e2": .idriveE2, "s3": .s3, "gcs": .gcs, "azure": .azureBlob, "wasabi": .wasabi, "do": .digitalOceanSpaces, "s3c": .s3Compatible]
+    let byID: [String: Provider] = ["r2": .cloudflareR2, "b2": .backblazeB2, "e2": .idriveE2, "s3": .s3, "gcs": .gcs, "azure": .azureBlob, "wasabi": .wasabi, "do": .digitalOceanSpaces, "hetzner": .hetzner, "storj": .storj, "s3c": .s3Compatible]
     precondition(catalogue.providers.count == byID.count)
     for entry in catalogue.providers {
         guard let provider = byID[entry.id] else { fatalError("unmapped catalogue id \(entry.id)") }
@@ -412,4 +412,15 @@ do {
     let bad = Data(#"{"errors":[{"message":"cannot order by datetime: it is neither aggregated, nor a dimension"}]}"#.utf8)
     precondition(R2Analytics.failureReason(status: 200, data: bad).contains("cannot order by datetime"))
     print("PASS: R2 storage query selects the datetime it orders by")
+}
+
+do {
+    for provider in [Provider.hetzner, .storj] {
+        precondition(provider.backend == "s3" && provider.isObjectStorage && provider.prefersArchive)
+        precondition(provider.pricing != nil && provider.guide != nil && provider.egressNote != nil)
+        precondition(InsightSupport.info(provider).needsToken == false)
+    }
+    precondition(Provider.hetzner.s3Flavor == "Hetzner" && Provider.storj.s3Flavor == "Storj")
+    precondition(Provider.storj.chargesEgress && !Provider.hetzner.chargesEgress)
+    print("PASS: Hetzner Object Storage and Storj providers")
 }

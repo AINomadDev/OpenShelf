@@ -66,6 +66,16 @@ pub const PROVIDERS: &[Provider] = &[
         console_url: "https://console.wasabisys.com/",
         steps: &["Create a bucket and note its region.", "Create an access key.", "The endpoint is s3.<region>.wasabisys.com."],
         fields: &[f("endpoint", "Endpoint", false, "https://s3.eu-central-1.wasabisys.com"), S3_KEYS[0], S3_KEYS[1]] },
+    Provider { id: "hetzner", title: "Hetzner Object Storage", backend: "s3", s3_flavor: Some("Hetzner"), free_tier: None, charges_egress: false, price_per_gb: Some(0.0065),
+        egress_note: "Hetzner includes 1 TB of outbound traffic with the base price, then bills extra per TB.",
+        console_url: "https://console.hetzner.cloud/",
+        steps: &["Create a bucket under Object Storage and note its location.", "Create S3 credentials for the project.", "The endpoint is <location>.your-objectstorage.com."],
+        fields: &[f("endpoint", "Endpoint", false, "https://fsn1.your-objectstorage.com"), S3_KEYS[0], S3_KEYS[1]] },
+    Provider { id: "storj", title: "Storj", backend: "s3", s3_flavor: Some("Storj"), free_tier: None, charges_egress: true, price_per_gb: Some(0.004),
+        egress_note: "Storj bills egress per GB (about $0.007/GB), so archive here and restore only when needed.",
+        console_url: "https://storj.io/",
+        steps: &["Create a bucket in the Storj console.", "Generate S3 credentials with the permissions you need.", "The endpoint is https://gateway.storjshare.io."],
+        fields: &[f("endpoint", "Endpoint", false, "https://gateway.storjshare.io"), S3_KEYS[0], S3_KEYS[1]] },
     Provider { id: "do", title: "DigitalOcean Spaces", backend: "s3", s3_flavor: Some("DigitalOcean"), free_tier: None, charges_egress: false, price_per_gb: Some(0.02),
         egress_note: "Spaces bundles 1 TB of outbound transfer with the base plan, then bills extra per GB.",
         console_url: "https://cloud.digitalocean.com/spaces",
@@ -136,7 +146,7 @@ pub fn build_config(provider: &Provider, fields: &HashMap<String, String>) -> Re
                     out.push(("endpoint".into(), format!("https://{id}.r2.cloudflarestorage.com")));
                     out.push(("region".into(), "auto".into()));
                 }
-                "e2" | "wasabi" | "do" | "s3c" => {
+                "e2" | "wasabi" | "do" | "hetzner" | "storj" | "s3c" => {
                     let endpoint = https(&need("endpoint", "the endpoint")?);
                     if !valid_https(&endpoint) { return Err("Enter a valid HTTPS endpoint or SAS URL.".into()); }
                     out.push(("endpoint".into(), endpoint));

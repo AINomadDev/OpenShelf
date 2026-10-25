@@ -19,6 +19,8 @@ enum ShelfTheme {
         case .idriveE2: return Color(red: 0.12, green: 0.55, blue: 0.55)
         case .wasabi: return Color(red: 0.2, green: 0.62, blue: 0.35)
         case .digitalOceanSpaces: return Color(red: 0.0, green: 0.41, blue: 1.0)
+        case .hetzner: return Color(red: 0.84, green: 0.0, blue: 0.1)
+        case .storj: return Color(red: 0.08, green: 0.36, blue: 0.95)
         case .other: return muted
         }
     }

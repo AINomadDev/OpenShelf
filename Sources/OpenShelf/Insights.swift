@@ -213,7 +213,7 @@ enum UsageHint {
             case .warning: return "Nearly at the \(free) free tier. Beyond it, storage is billed pay-as-you-go (about \(rate(provider)) per GB per month). Nothing stops working."
             default: return "\(free) of storage is free each month. Beyond that you pay as you go (about \(rate(provider)) per GB per month), with no upfront plan."
             }
-        case .s3, .gcs, .azureBlob, .wasabi, .digitalOceanSpaces, .s3Compatible:
+        case .s3, .gcs, .azureBlob, .wasabi, .digitalOceanSpaces, .hetzner, .storj, .s3Compatible:
             guard let price = provider.pricing else { return "Pay as you go: you are billed for what you store, requests and any downloads." }
             return "Pay as you go, no free allowance: about \(rateText(price.storagePerGB)) per GB per month for storage. " + (provider.chargesEgress ? "Downloading data back also costs money, so keep this as an archive." : "Estimate only.")
         case .other: return nil
@@ -236,7 +236,7 @@ enum InsightSupport {
             return Info(title: "Automatic", detail: "Storage quota comes from your iCloud session. No token needed; sign in again if it lapses.", needsToken: false)
         case .gcs, .s3, .azureBlob:
             return Info(title: "Usage from listing", detail: "\(provider.title) usage and billing live behind separate cloud monitoring and billing APIs that a storage key cannot call, so OpenShelf measures by listing and estimates cost from list prices. A token field will appear if a safe option exists.", needsToken: false)
-        case .backblazeB2, .idriveE2, .wasabi, .digitalOceanSpaces, .s3Compatible:
+        case .backblazeB2, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj, .s3Compatible:
             return Info(title: "Usage from listing", detail: "\(provider.title) has no usage or billing API that accepts storage keys, so OpenShelf measures by listing and estimates cost from list prices. No token to add.", needsToken: false)
         case .other:
             return Info(title: "Not available", detail: "No extra account information for this storage type.", needsToken: false)

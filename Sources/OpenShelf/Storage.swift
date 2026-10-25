@@ -1,7 +1,7 @@
 import Foundation
 
 enum Provider: String, Codable, CaseIterable, Identifiable {
-    case googleDrive, iCloud, s3, gcs, azureBlob, s3Compatible, cloudflareR2, backblazeB2, idriveE2, wasabi, digitalOceanSpaces, other
+    case googleDrive, iCloud, s3, gcs, azureBlob, s3Compatible, cloudflareR2, backblazeB2, idriveE2, wasabi, digitalOceanSpaces, hetzner, storj, other
     var id: String { rawValue }
     static var selectable: [Provider] { allCases.filter { $0 != .other } }
     var title: String {
@@ -17,6 +17,8 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .idriveE2: return "IDrive e2"
         case .wasabi: return "Wasabi"
         case .digitalOceanSpaces: return "DigitalOcean Spaces"
+        case .hetzner: return "Hetzner Object Storage"
+        case .storj: return "Storj"
         case .other: return "Other storage"
         }
     }
@@ -24,7 +26,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .googleDrive: return "drive"
         case .iCloud: return "iclouddrive"
-        case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces: return "s3"
+        case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj: return "s3"
         case .gcs: return "google cloud storage"
         case .azureBlob: return "azureblob"
         case .backblazeB2: return "b2"
@@ -38,8 +40,12 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .s3Compatible: return "Other"
         case .cloudflareR2: return "Cloudflare"
         case .idriveE2: return "IDrive"
+        case .hetzner: return "Hetzner"
+        case .storj: return "Storj"
         case .wasabi: return "Wasabi"
         case .digitalOceanSpaces: return "DigitalOcean"
+        case .hetzner: return "Hetzner"
+        case .storj: return "Storj"
         default: return nil
         }
     }
@@ -47,7 +53,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .googleDrive: return "triangle"
         case .iCloud: return "icloud"
-        case .s3, .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces: return "shippingbox"
+        case .s3, .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj: return "shippingbox"
         case .cloudflareR2: return "cloud.bolt"
         case .backblazeB2: return "flame"
         case .gcs: return "cloud"
@@ -55,7 +61,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .other: return "externaldrive"
         }
     }
-    var isObjectStorage: Bool { [.s3, .gcs, .azureBlob, .s3Compatible, .cloudflareR2, .backblazeB2, .idriveE2, .wasabi, .digitalOceanSpaces].contains(self) }
+    var isObjectStorage: Bool { [.s3, .gcs, .azureBlob, .s3Compatible, .cloudflareR2, .backblazeB2, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj].contains(self) }
     // Egress-priced object storage is treated as an archive by default.
     var prefersArchive: Bool { isObjectStorage }
     // Free allowance advertised by pay-as-you-go archive providers; nil when there is no fixed allowance.
@@ -70,6 +76,8 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .cloudflareR2: return "Cloudflare"
         case .backblazeB2: return "Backblaze"
         case .idriveE2: return "IDrive"
+        case .hetzner: return "Hetzner"
+        case .storj: return "Storj"
         default: return nil
         }
     }
@@ -82,7 +90,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
     }
     var freeTierBytes: Int64? { [.cloudflareR2, .backblazeB2, .idriveE2].contains(self) ? 10_000_000_000 : nil }
     // Providers where reading data back can produce a surprise bill.
-    var chargesEgress: Bool { [.s3, .gcs, .azureBlob, .s3Compatible].contains(self) }
+    var chargesEgress: Bool { [.s3, .gcs, .azureBlob, .s3Compatible, .storj].contains(self) }
     var egressNote: String? {
         switch self {
         case .s3, .gcs, .azureBlob: return "Downloads are billed per GB. Archive here; restore only when needed."
@@ -91,6 +99,8 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .idriveE2: return "e2 includes a free download allowance based on your stored data; check your plan."
         case .wasabi: return "Wasabi has no egress or request fees under its fair-use policy. Storage is billed with a 1 TB minimum and 90-day minimum retention."
         case .digitalOceanSpaces: return "Spaces bundles 1 TB of outbound transfer with the base plan, then bills extra per GB."
+        case .hetzner: return "Hetzner includes 1 TB of outbound traffic with the base price, then bills extra per TB."
+        case .storj: return "Storj bills egress per GB (about $0.007/GB), so archive here and restore only when needed."
         case .s3Compatible: return "Check your provider's download and request pricing."
         default: return nil
         }
@@ -113,6 +123,8 @@ extension Provider {
         case .idriveE2: return guide(["Create a bucket in the IDrive e2 dashboard.", "Open Access Keys and create a key for it.", "Copy the endpoint listed for your bucket's region.", "Paste the endpoint, Access Key ID and Secret Access Key here."], "https://app.idrivee2.com/", "Open IDrive e2")
         case .wasabi: return guide(["Create a bucket in the Wasabi console and note its region.", "Open Access Keys and create a key.", "Your endpoint is s3.<region>.wasabisys.com (for example https://s3.eu-central-1.wasabisys.com).", "Paste the endpoint, Access Key ID and Secret Access Key here."], "https://console.wasabisys.com/", "Open Wasabi")
         case .digitalOceanSpaces: return guide(["Create a Space in the DigitalOcean control panel and note its region.", "Open API, then Spaces Keys, and generate a key pair.", "Your endpoint is <region>.digitaloceanspaces.com (for example https://nyc3.digitaloceanspaces.com).", "Paste the endpoint and keys here, with the Space name as the bucket."], "https://cloud.digitalocean.com/spaces", "Open DigitalOcean Spaces")
+        case .hetzner: return guide(["Create a bucket in the Hetzner Console under Object Storage and note its location.", "Create S3 credentials for the project.", "Your endpoint is <location>.your-objectstorage.com (for example https://fsn1.your-objectstorage.com).", "Paste the endpoint and keys here, with the bucket name as the bucket."], "https://console.hetzner.cloud/", "Open Hetzner Console")
+        case .storj: return guide(["Create a bucket in the Storj console.", "Create S3 credentials (Access Grant, then Generate S3 Credentials) with the permissions you need.", "The endpoint is https://gateway.storjshare.io.", "Paste the endpoint and keys here, with the bucket name as the bucket."], "https://storj.io/", "Open Storj")
         case .s3: return guide(["Create a private bucket in the S3 console.", "In IAM create a user limited to that bucket (list, get, put, delete).", "Create an access key for that user and copy both values.", "Paste them here with the bucket's region."], "https://console.aws.amazon.com/s3/", "Open AWS S3")
         case .gcs: return guide(["Create a bucket in Google Cloud Storage.", "Create a service account and grant it Storage Object User on that bucket only.", "Add a JSON key to the service account and download it.", "Choose the downloaded file here. Keep it out of any repository."], "https://console.cloud.google.com/storage/browser", "Open Google Cloud Storage")
         case .azureBlob: return guide(["Create a storage account and a container.", "Open the container's Shared access tokens.", "Generate a SAS with the permissions you need and a sensible expiry.", "Paste the full SAS URL here."], "https://portal.azure.com/#browse/Microsoft.Storage%2FStorageAccounts", "Open Azure Storage")
@@ -176,6 +188,10 @@ extension Provider {
             return PricingInfo(storagePerGB: 0.0069, freeBytes: nil, egress: "Free under fair-use policy (egress should not exceed stored data)", operations: "No request fees.", extra: "Billed at a 1 TB minimum and 90-day minimum retention, so small archives cost more than the per-GB figure suggests.", url: URL(string: "https://wasabi.com/paygo-pricing-faq")!)
         case .digitalOceanSpaces:
             return PricingInfo(storagePerGB: 0.02, freeBytes: nil, egress: "1 TB/month included, then about $0.01/GB", operations: "No request fees.", extra: "The base plan is about $5/month and includes 250 GB of storage, so the per-GB figure applies only beyond that.", url: URL(string: "https://www.digitalocean.com/pricing/spaces-object-storage")!)
+        case .hetzner:
+            return PricingInfo(storagePerGB: 0.0065, freeBytes: nil, egress: "1 TB/month included, then about $0.0065/GB", operations: "No request fees.", extra: "The base plan is about $6/month and includes 1 TB of storage and 1 TB of traffic, so small amounts cost more per GB than shown.", url: URL(string: "https://www.hetzner.com/storage/object-storage/")!)
+        case .storj:
+            return PricingInfo(storagePerGB: 0.004, freeBytes: nil, egress: "About $0.007/GB downloaded", operations: "Per-segment fee on small files; minimum monthly charge applies.", extra: "Storj replaces its trial with paid plans; check the current plan.", url: URL(string: "https://www.storj.io/pricing")!)
         case .idriveE2:
             return PricingInfo(storagePerGB: 0.005, freeBytes: 10_000_000_000, egress: "Free allowance tied to stored data, then $0.01/GB (check your plan)", operations: "No request fees.", extra: "First-year promotional pricing is common.", url: URL(string: "https://www.idrive.com/e2/pricing")!)
         case .gcs:

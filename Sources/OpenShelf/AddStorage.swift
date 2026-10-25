@@ -138,7 +138,7 @@ final class ConnectionDraft: ObservableObject {
                 manager.showingAddStorage = false
                 manager.setup(storage)
                 return
-            case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces, .backblazeB2, .gcs, .azureBlob:
+            case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj, .backblazeB2, .gcs, .azureBlob:
                 try objectStorageValues(&values, required: required)
             case .other: throw SetupError.missing("provider")
             }
@@ -159,7 +159,7 @@ final class ConnectionDraft: ObservableObject {
     // Credential values for every key-based object-storage provider; shared by new connections and credential replacement.
     private func objectStorageValues(_ values: inout [String: String], required: (String, String) throws -> String) throws {
         switch provider {
-        case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces:
+        case .s3, .s3Compatible, .cloudflareR2, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj:
             try s3Values(&values, required: required)
         case .backblazeB2:
             values["account"] = try required("account", "application key ID")
@@ -254,7 +254,7 @@ final class ConnectionDraft: ObservableObject {
             guard let account = EndpointInput.r2AccountID(try required("account_id", "Cloudflare account ID")) else { throw SetupError.endpoint }
             values["endpoint"] = "https://\(account).r2.cloudflarestorage.com"
             values["region"] = "auto"
-        case .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces:
+        case .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj:
             let endpoint = EndpointInput.https(try required("endpoint", "HTTPS endpoint"))
             guard let url = URL(string: endpoint), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil else { throw SetupError.endpoint }
             values["endpoint"] = endpoint
@@ -494,7 +494,7 @@ struct AddStorageView: View {
                 switch draft.provider {
                 case .googleDrive: required = draft.reuseGoogleClient ? [] : ["client_id", "client_secret"]
                 case .s3: required = ["access_key_id", "secret_access_key"]
-                case .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces: required = ["endpoint", "access_key_id", "secret_access_key"]
+                case .s3Compatible, .idriveE2, .wasabi, .digitalOceanSpaces, .hetzner, .storj: required = ["endpoint", "access_key_id", "secret_access_key"]
                 case .cloudflareR2: required = ["account_id", "access_key_id", "secret_access_key"]
                 case .backblazeB2: required = ["account", "key"]
                 case .gcs: required = ["credential_file"]
@@ -570,8 +570,8 @@ struct ProviderFields: View {
             inputField("Access key ID", text: draft.value("access_key_id"))
             secretField("Secret access key", text: draft.value("secret_access_key"))
             Text("Copy the endpoint shown for your bucket's region in the IDrive e2 dashboard.").font(.caption).foregroundStyle(.secondary)
-        case .wasabi, .digitalOceanSpaces:
-            inputField("HTTPS endpoint", text: draft.value("endpoint"), prompt: draft.provider == .wasabi ? "https://s3.eu-central-1.wasabisys.com" : "https://nyc3.digitaloceanspaces.com")
+        case .wasabi, .digitalOceanSpaces, .hetzner, .storj:
+            inputField("HTTPS endpoint", text: draft.value("endpoint"), prompt: [Provider.wasabi: "https://s3.eu-central-1.wasabisys.com", .hetzner: "https://fsn1.your-objectstorage.com", .storj: "https://gateway.storjshare.io"][draft.provider] ?? "https://nyc3.digitaloceanspaces.com")
             inputField("Access key ID", text: draft.value("access_key_id"))
             secretField("Secret access key", text: draft.value("secret_access_key"))
             Text("The endpoint depends on the region you created the bucket in; see the setup steps above.").font(.caption).foregroundStyle(.secondary)
