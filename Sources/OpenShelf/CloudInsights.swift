@@ -206,3 +206,39 @@ struct ShelfTotals: Equatable {
         return totals
     }
 }
+
+/// Creating an R2 bucket through the Cloudflare API. The token is used once and never stored.
+enum R2Buckets {
+    /// R2 bucket names: 3-63 characters, lowercase letters, digits and hyphens, not starting or ending with a hyphen.
+    static func isValidName(_ name: String) -> Bool {
+        name.range(of: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", options: .regularExpression) != nil
+    }
+
+    static func request(token: String, account: String, bucket: String) -> URLRequest? {
+        guard isValidName(bucket), account.range(of: "^[A-Za-z0-9]+$", options: .regularExpression) != nil,
+              let url = URL(string: "https://api.cloudflare.com/client/v4/accounts/\(account)/r2/buckets") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["name": bucket])
+        return request
+    }
+
+    /// Nil means the bucket was created (or already exists and is yours); otherwise what to fix.
+    static func failureReason(status: Int?, data: Data?) -> String? {
+        guard let status else { return "Could not reach Cloudflare. Check your internet connection." }
+        var messages: [String] = []
+        if let data, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for item in root["errors"] as? [[String: Any]] ?? [] { if let m = item["message"] as? String { messages.append(m) } }
+        }
+        let detail = messages.first.map { " Cloudflare said: \($0)" } ?? ""
+        switch status {
+        case 200...299: return nil
+        case 401: return "Cloudflare did not accept this token. Paste the token value, not the Token ID." + detail
+        case 403: return "This token cannot create buckets. Give it Account → Workers R2 Storage → Edit (the analytics token is read-only)." + detail
+        case 409: return "A bucket with this name already exists in your account. Choose another name, or use it as is." + detail
+        default: return "Cloudflare could not create the bucket (HTTP \(status))." + detail
+        }
+    }
+}

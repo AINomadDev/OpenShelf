@@ -24,6 +24,9 @@ final class ConnectionDraft: ObservableObject {
     @Published var removeToken = false
     @Published var tokenStatus: String?
     @Published var tokenOK = false
+    @Published var creatingBucket = false
+    @Published var bucketStatus: String?
+    @Published var bucketOK = false
     @Published var testingToken = false
     @Published var tagsText = ""
     @Published var ignoreText = ""
@@ -198,6 +201,28 @@ final class ConnectionDraft: ObservableObject {
         message = nil
     }
     /// Saves edited details. New credentials are written first and validated; the previous config is restored if the check fails.
+    func createR2Bucket() {
+        let name = (fields["new_bucket"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = (fields["create_token"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        bucketOK = false
+        guard let account = EndpointInput.r2AccountID(fields["account_id"] ?? "") else { bucketStatus = "Enter your Cloudflare account ID above first."; return }
+        guard R2Buckets.isValidName(name) else { bucketStatus = "Bucket names are 3-63 characters: lowercase letters, digits and hyphens."; return }
+        guard !token.isEmpty, !token.contains("\n"), token.count < 400, let request = R2Buckets.request(token: token, account: account, bucket: name) else { bucketStatus = "Paste a Cloudflare API token first."; return }
+        creatingBucket = true; bucketStatus = nil
+        Task { @MainActor in
+            let result = try? await URLSession.shared.data(for: request)
+            let status = (result?.1 as? HTTPURLResponse)?.statusCode
+            if let problem = R2Buckets.failureReason(status: status, data: result?.0) {
+                bucketStatus = problem
+            } else {
+                bucketOK = true
+                bucketStatus = "Bucket \(name) is ready. Create an R2 access key for it and paste the keys above."
+                root = name; fields["create_token"] = ""
+            }
+            creatingBucket = false
+        }
+    }
+
     func saveEdits(_ manager: DriveManager, original: Storage) async {
         guard !working else { return }
         working = true
@@ -561,6 +586,18 @@ struct ProviderFields: View {
             inputField("Access key ID", text: draft.value("access_key_id"))
             secretField("Secret access key", text: draft.value("secret_access_key"))
             Text("Create an R2 API token scoped to this bucket (Object Read & Write). The endpoint is built from your account ID.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("No bucket yet? Create one here") {
+                VStack(alignment: .leading, spacing: 8) {
+                    inputField("New bucket name", text: draft.value("new_bucket"), prompt: "media-archive")
+                    secretField("Cloudflare API token (Workers R2 Storage: Edit)", text: draft.value("create_token"))
+                    Text("Used once to create the bucket and never saved. It is different from the read-only analytics token.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button(draft.creatingBucket ? "Creating…" : "Create bucket") { draft.createR2Bucket() }
+                        .buttonStyle(ShelfButtonStyle(prominent: false)).disabled(draft.creatingBucket)
+                    if let status = draft.bucketStatus {
+                        Label(status, systemImage: draft.bucketOK ? "checkmark.circle.fill" : "xmark.octagon").font(.system(size: 12)).foregroundStyle(draft.bucketOK ? Color.green : Color.red).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.padding(.top, 6)
+            }.font(.system(size: 12, weight: .medium))
         case .backblazeB2:
             inputField("Application key ID", text: draft.value("account"))
             secretField("Application key", text: draft.value("key"))

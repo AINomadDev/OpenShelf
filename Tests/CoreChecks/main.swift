@@ -424,3 +424,16 @@ do {
     precondition(Provider.storj.chargesEgress && !Provider.hetzner.chargesEgress)
     print("PASS: Hetzner Object Storage and Storj providers")
 }
+
+do {
+    for ok in ["media-archive", "abc", "a1-b2"] { precondition(R2Buckets.isValidName(ok), ok) }
+    for bad in ["ab", "-abc", "abc-", "Media", "has space", "under_score", String(repeating: "a", count: 64), ""] { precondition(!R2Buckets.isValidName(bad), bad) }
+    let request = R2Buckets.request(token: "t", account: "abc123", bucket: "media-archive")!
+    precondition(request.url?.absoluteString == "https://api.cloudflare.com/client/v4/accounts/abc123/r2/buckets" && request.httpMethod == "POST")
+    precondition(R2Buckets.request(token: "t", account: "../x", bucket: "media-archive") == nil)
+    precondition(R2Buckets.request(token: "t", account: "abc123", bucket: "Bad Name") == nil)
+    precondition(R2Buckets.failureReason(status: 200, data: nil) == nil)
+    precondition(R2Buckets.failureReason(status: 403, data: nil)!.contains("Workers R2 Storage"))
+    precondition(R2Buckets.failureReason(status: 409, data: nil)!.contains("already exists"))
+    print("PASS: R2 bucket creation request and error mapping")
+}
