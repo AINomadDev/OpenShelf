@@ -375,3 +375,17 @@ do {
     precondition(Storage.googleDrive.expectedDirectory == "Google Drive")
     print("PASS: pending folder rename after a mounted edit")
 }
+
+do {
+    let home = URL(fileURLWithPath: "/h", isDirectory: true)
+    var space = try Storage.make(provider: .backblazeB2, title: "Arc", root: "b", existing: [], readOnly: false, autoMount: false)
+    space = try space.updating(title: "Arc", root: "b", readOnly: false, autoMount: false, mode: .archive, ignore: IgnoreInput.parse("*.tmp, build/**\n*.tmp,  , cache/**"), existing: [space])
+    precondition(space.ignore == ["*.tmp", "build/**", "cache/**"])
+    let copy = space.archiveCopyArguments(source: URL(fileURLWithPath: "/src"), subfolder: "", home: home)
+    precondition(copy.contains("build/**") && copy.contains("node_modules/**"))
+    precondition(space.verifyArguments(source: URL(fileURLWithPath: "/src"), subfolder: "", home: home).contains("*.tmp"))
+    precondition(IgnoreInput.parse(String(repeating: "a,", count: 100)).count == 1 && IgnoreInput.parse((1...50).map { "p\($0)" }.joined(separator: ",")).count == IgnoreInput.maxPatterns)
+    let decoded = try JSONDecoder().decode(Storage.self, from: JSONEncoder().encode(space))
+    precondition(decoded.ignore == space.ignore)
+    print("PASS: per-space ignore list for archive and verify")
+}

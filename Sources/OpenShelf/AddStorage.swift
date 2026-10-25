@@ -23,6 +23,7 @@ final class ConnectionDraft: ObservableObject {
     @Published var apiToken = ""
     @Published var removeToken = false
     @Published var tagsText = ""
+    @Published var ignoreText = ""
     @Published var note = ""
     private var authProcess: Process?
     private var cancelled = false
@@ -188,6 +189,7 @@ final class ConnectionDraft: ObservableObject {
         archive = storage.isArchive
         replacingCredentials = false
         tagsText = storage.tags.joined(separator: ", ")
+        ignoreText = storage.ignore.joined(separator: ", ")
         note = storage.note
         fields = [:]
         message = nil
@@ -204,12 +206,12 @@ final class ConnectionDraft: ObservableObject {
             let tags = TagInput.parse(tagsText)
             // A mounted drive keeps its name, path, access and credentials; only labels, auto-mount and mode can change.
             if !manager.canEdit(original) {
-                let live = try original.updating(title: name, root: original.root, readOnly: original.readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, keepFolder: true, existing: manager.connections)
+                let live = try original.updating(title: name, root: original.root, readOnly: original.readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, ignore: IgnoreInput.parse(ignoreText), keepFolder: true, existing: manager.connections)
                 try manager.applyLiveEdit(original, with: live)
                 manager.spaceToEdit = nil
                 return
             }
-            let updated = try original.updating(title: name, root: root, readOnly: readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, existing: manager.connections)
+            let updated = try original.updating(title: name, root: root, readOnly: readOnly, autoMount: autoMount, mode: archive ? .archive : .live, tags: tags, note: note, ignore: IgnoreInput.parse(ignoreText), existing: manager.connections)
             let replacing = replacingCredentials && original.ownConfig && original.provider.isObjectStorage
             if replacing {
                 provider = original.provider
@@ -604,6 +606,10 @@ struct EditStorageView: View {
                 VStack(spacing: 16) {
                     ShelfSection(title: "Labels", subtitle: "Shown on the card and searchable. Safe to change any time.") {
                         inputField("Tags (comma separated)", text: $draft.tagsText, prompt: "work, family, backup")
+                        if storage.provider.isObjectStorage {
+                            inputField("Skip when archiving or verifying (comma separated)", text: $draft.ignoreText, prompt: "*.tmp, build/**, cache/**")
+                            Text("Always skipped: ._*, .DS_Store, .Trash, node_modules, .git/objects. Patterns use rclone filter syntax and only affect Archive folder and Verify archive, not files already in the space.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+                        }
                         inputField("Note", text: $draft.note, prompt: "What is this space for?")
                         if storage.provider.pricing != nil {
                             inputField("Monthly budget in USD (optional, alerts at 80%)", text: $draft.budgetText, prompt: "e.g. 5")

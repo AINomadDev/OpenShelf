@@ -108,14 +108,14 @@ extension Storage {
     /// Copies a local folder into this space under `subfolder`. Copy never deletes anything at the destination.
     func archiveCopyArguments(source: URL, subfolder: String, home: URL) -> [String] {
         ["copy", source.path, destination(subfolder)]
-            + Self.archiveExcludes.flatMap { ["--exclude", $0] }
+            + (Self.archiveExcludes + ignore).flatMap { ["--exclude", $0] }
             + ["--transfers", "4", "--checkers", "8", "--stats", "10s", "--stats-one-line", "--log-level", "NOTICE"]
             + configArguments(home: home)
     }
     /// Compares a local folder with its archived copy by size and checksum, without downloading file contents when hashes are available.
     func verifyArguments(source: URL, subfolder: String, home: URL) -> [String] {
         ["check", source.path, destination(subfolder), "--one-way"]
-            + Self.archiveExcludes.flatMap { ["--exclude", $0] }
+            + (Self.archiveExcludes + ignore).flatMap { ["--exclude", $0] }
             + configArguments(home: home)
     }
     private func destination(_ subfolder: String) -> String {

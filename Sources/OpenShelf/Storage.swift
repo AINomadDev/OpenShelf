@@ -266,10 +266,12 @@ struct Storage: Codable, Identifiable, Hashable {
     var note: String = ""
     // Files are encrypted client-side by an rclone crypt overlay in the same config file. Chosen at creation only.
     var encrypted: Bool = false
+    // Extra rclone exclude patterns for archive and verify jobs on this space; safe to change while mounted.
+    var ignore: [String] = []
     static let googleDrive = Storage(id: "googleDrive", provider: .googleDrive, title: "Google Drive", remote: "cloudshelf-google", backend: "drive", root: "", directory: "Google Drive", cacheKey: "googleDrive", port: 55731, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let iCloud = Storage(id: "iCloud", provider: .iCloud, title: "iCloud Drive", remote: "cloudshelf-icloud", backend: "iclouddrive", root: "", directory: "iCloud Drive", cacheKey: "iCloud", port: 55732, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let legacy: [Storage] = [.googleDrive, .iCloud]
-    enum CodingKeys: String, CodingKey { case id, provider, title, remote, backend, root, directory, cacheKey, port, ownConfig, autoMount, readOnly, mode, tags, note, encrypted }
+    enum CodingKeys: String, CodingKey { case id, provider, title, remote, backend, root, directory, cacheKey, port, ownConfig, autoMount, readOnly, mode, tags, note, encrypted, ignore }
     func quota(for usage: StorageUsage?) -> QuotaStatus? {
         guard let usage, usage.isReported else { return nil }
         return QuotaStatus(used: usage.usedBytes, limit: usage.totalBytes ?? provider.freeTierBytes)
@@ -328,7 +330,7 @@ struct Storage: Codable, Identifiable, Hashable {
 
 extension Storage {
     /// Returns a copy with edited details. Identity, ports, caches and credentials stay the same.
-    func updating(title newTitle: String, root newRoot: String, readOnly: Bool, autoMount: Bool, mode: AccessMode, tags newTags: [String]? = nil, note newNote: String? = nil, keepFolder: Bool = false, existing: [Storage]) throws -> Storage {
+    func updating(title newTitle: String, root newRoot: String, readOnly: Bool, autoMount: Bool, mode: AccessMode, tags newTags: [String]? = nil, note newNote: String? = nil, ignore newIgnore: [String]? = nil, keepFolder: Bool = false, existing: [Storage]) throws -> Storage {
         let label = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !label.isEmpty, label.count <= 80, !label.contains("/"), !label.contains(":"), !label.contains(where: { $0.isNewline }) else { throw StorageError.invalidName }
         guard !newRoot.contains(where: { $0.isNewline }), !newRoot.split(separator: "/").contains("..") else { throw StorageError.invalidRoot }
@@ -341,6 +343,7 @@ extension Storage {
         copy.autoMount = autoMount
         copy.mode = provider.prefersArchive ? mode : .live
         if let newTags { copy.tags = newTags }
+        if let newIgnore { copy.ignore = newIgnore }
         if let newNote { copy.note = String(newNote.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200)).replacingOccurrences(of: "\n", with: " ") }
         // The two built-in accounts keep their fixed Finder folder names.
         if !keepFolder, !Storage.legacy.contains(where: { $0.id == id }) { copy.directory = Storage.folderName(title: label, provider: provider, id: id) }
@@ -366,6 +369,7 @@ extension Storage {
         tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
         encrypted = try c.decodeIfPresent(Bool.self, forKey: .encrypted) ?? false
+        ignore = try c.decodeIfPresent([String].self, forKey: .ignore) ?? []
     }
 }
 
@@ -541,6 +545,16 @@ enum LegacyMigration {
     }
 }
 
+
+enum IgnoreInput {
+    static let maxPatterns = 30
+    /// Comma- or line-separated rclone exclude patterns. Blank and oversized entries are dropped, duplicates removed.
+    static func parse(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text.split(whereSeparator: { $0 == "," || $0.isNewline }).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0.count <= 120 && seen.insert($0).inserted }.prefix(maxPatterns).map { $0 }
+    }
+}
 
 enum TagInput {
     /// Comma-separated text to at most 8 unique tags of up to 24 characters.
