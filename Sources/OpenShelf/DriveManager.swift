@@ -117,7 +117,7 @@ final class DriveManager: ObservableObject {
     private var started: [Storage: Date] = [:]
     private let launchctl = URL(fileURLWithPath: "/bin/launchctl")
     // Preview mode shows sample data in a scratch home and never starts mounts or reads real configuration.
-    static let isPreview = ProcessInfo.processInfo.environment["CLOUDSHELF_PREVIEW"] == "1"
+    static let isPreview = ProcessInfo.processInfo.environment["OPENSHELF_PREVIEW"] == "1"
     private let home = DriveManager.isPreview
         ? FileManager.default.temporaryDirectory.appendingPathComponent("openshelf-preview", isDirectory: true)
         : FileManager.default.homeDirectoryForCurrentUser

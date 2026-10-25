@@ -22,7 +22,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0-preview</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
-<key>LSEnvironment</key><dict><key>CLOUDSHELF_PREVIEW</key><string>1</string></dict>
+<key>LSEnvironment</key><dict><key>OPENSHELF_PREVIEW</key><string>1</string></dict>
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP"
