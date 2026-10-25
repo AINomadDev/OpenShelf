@@ -222,3 +222,24 @@ enum UsageHint {
     private static func rateText(_ value: Double) -> String { String(format: "$%.3f", value) }
     private static func rate(_ provider: Provider) -> String { provider.pricing.map { rateText($0.storagePerGB) } ?? "n/a" }
 }
+
+/// What extra account information OpenShelf can read for each provider, shown in Edit details so the options are discoverable.
+enum InsightSupport {
+    struct Info: Equatable { let title: String; let detail: String; let needsToken: Bool }
+    static func info(_ provider: Provider) -> Info {
+        switch provider {
+        case .cloudflareR2:
+            return Info(title: "Live usage and request counts", detail: "Add a read-only Cloudflare API token to read real storage and Class A/B request counts without billed list calls. One token covers every R2 space in the same Cloudflare account.", needsToken: true)
+        case .googleDrive:
+            return Info(title: "Automatic", detail: "Quota and the signed-in email come from your Google sign-in. No token needed.", needsToken: false)
+        case .iCloud:
+            return Info(title: "Automatic", detail: "Storage quota comes from your iCloud session. No token needed; sign in again if it lapses.", needsToken: false)
+        case .gcs, .s3, .azureBlob:
+            return Info(title: "Usage from listing", detail: "\(provider.title) usage and billing live behind separate cloud monitoring and billing APIs that a storage key cannot call, so OpenShelf measures by listing and estimates cost from list prices. A token field will appear if a safe option exists.", needsToken: false)
+        case .backblazeB2, .idriveE2, .wasabi, .digitalOceanSpaces, .s3Compatible:
+            return Info(title: "Usage from listing", detail: "\(provider.title) has no usage or billing API that accepts storage keys, so OpenShelf measures by listing and estimates cost from list prices. No token to add.", needsToken: false)
+        case .other:
+            return Info(title: "Not available", detail: "No extra account information for this storage type.", needsToken: false)
+        }
+    }
+}

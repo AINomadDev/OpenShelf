@@ -389,3 +389,10 @@ do {
     precondition(decoded.ignore == space.ignore)
     print("PASS: per-space ignore list for archive and verify")
 }
+
+do {
+    precondition(InsightSupport.info(.cloudflareR2).needsToken)
+    precondition(Provider.allCases.filter { InsightSupport.info($0).needsToken } == [.cloudflareR2])
+    precondition(Provider.allCases.allSatisfy { !InsightSupport.info($0).detail.isEmpty })
+    print("PASS: account insight support is described for every provider")
+}

@@ -511,6 +511,10 @@ struct StorageCard: View {
                 Color.clear.frame(height: 6)
                 Text(unreported ? (value?.measured == true ? "Measured by listing files" : "Total not reported · ⋯ › Measure size") : "Measuring storage…").font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
             }
+            if storage.provider == .cloudflareR2, !manager.hasCloudflareToken(storage) {
+                Button { manager.spaceToEdit = storage } label: { Label("Add Cloudflare token for live usage", systemImage: "key").font(.system(size: 10, weight: .medium)) }
+                    .buttonStyle(.plain).foregroundStyle(ShelfTheme.muted).help("A read-only Cloudflare API token lets OpenShelf read real storage and request counts without billed list requests.")
+            }
             Divider().opacity(0.5)
             if let stats = manager.activity[storage] {
                 let pending = stats.diskCache.uploadsInProgress + stats.diskCache.uploadsQueued

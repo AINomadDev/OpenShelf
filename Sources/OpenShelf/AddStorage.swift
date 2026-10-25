@@ -604,6 +604,20 @@ struct EditStorageView: View {
             }
             ScrollView {
                 VStack(spacing: 16) {
+                    ShelfSection(title: "Account insights", subtitle: InsightSupport.info(storage.provider).title) {
+                        Text(InsightSupport.info(storage.provider).detail).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+                        if storage.provider == .cloudflareR2 {
+                            if manager.hasCloudflareToken(storage) && !draft.removeToken {
+                                let sharing = manager.spacesInAccount(of: storage).count
+                                Label(sharing > 1 ? "A token is saved and shared by \(sharing) spaces in this Cloudflare account." : "A token is saved.", systemImage: "checkmark.seal").font(.system(size: 12))
+                                Toggle("Remove saved token", isOn: $draft.removeToken)
+                            } else {
+                                Label("No token yet. Usage comes from listing the bucket.", systemImage: "exclamationmark.circle").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
+                            }
+                            secretField("API token (Account Analytics: Read)", text: $draft.apiToken)
+                            Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read. It is stored once per Cloudflare account in an owner-only file and only sent to api.cloudflare.com.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     ShelfSection(title: "Labels", subtitle: "Shown on the card and searchable. Safe to change any time.") {
                         inputField("Tags (comma separated)", text: $draft.tagsText, prompt: "work, family, backup")
                         if storage.provider.isObjectStorage {
@@ -627,17 +641,6 @@ struct EditStorageView: View {
                         Toggle("Mount automatically at login", isOn: $draft.autoMount)
                         if storage.provider.prefersArchive {
                             Toggle("Archive mode (avoid repeated downloads)", isOn: $draft.archive)
-                        }
-                    }
-                    if storage.provider == .cloudflareR2 {
-                        ShelfSection(title: "Cloudflare analytics", subtitle: "Optional. With a read-only API token OpenShelf reads your real storage and request counts from Cloudflare (no billed list requests) and estimates request charges.") {
-                            if manager.hasCloudflareToken(storage) && !draft.removeToken {
-                                let sharing = manager.spacesInAccount(of: storage).count
-                                Label(sharing > 1 ? "A token is saved and shared by \(sharing) spaces in this Cloudflare account." : "A token is saved.", systemImage: "checkmark.seal").font(.system(size: 12))
-                                Toggle("Remove saved token", isOn: $draft.removeToken)
-                            }
-                            secretField("API token (Account Analytics: Read)", text: $draft.apiToken)
-                            Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read. It is stored once per Cloudflare account (spaces in the same account share it) in an owner-only file and only sent to api.cloudflare.com. Backblaze B2, IDrive e2, S3 and GCS offer no usage API for storage keys, so they have no token field.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     if canReplaceCredentials && !locked {
