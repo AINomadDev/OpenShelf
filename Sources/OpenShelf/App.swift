@@ -95,6 +95,7 @@ struct Dashboard: View {
                             metric(ByteCountFormatter.string(fromByteCount: manager.activity.values.reduce(0) { $0 + $1.diskCache.bytesUsed }, countStyle: .file), label: "Mounted cache", symbol: "internaldrive")
                             metric(manager.diskSpace.freeBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Checking", label: "Free on your Mac", symbol: "leaf")
                         }
+                        totalsPanel
                         usagePanel
                         if let warning = manager.diskSpace.warning {
                             Label(warning, systemImage: "exclamationmark.triangle.fill").font(.system(size: 12))
@@ -264,18 +265,18 @@ struct Dashboard: View {
                 Text("YOUR ACCOUNTS").font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(ShelfTheme.muted)
                 ScrollView {
                     VStack(spacing: 2) {
-                        ForEach(manager.connections) { storage in
-                            Button { manager.showAllSpaces(); manager.searchText = storage.title } label: {
+                        ForEach(accountTypes, id: \.self) { provider in
+                            Button { manager.showAllSpaces(); manager.providerFilter = provider } label: {
                                 HStack(spacing: 10) {
-                                    ProviderBadge(provider: storage.provider, size: 30)
+                                    ProviderBadge(provider: provider, size: 30)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(storage.title).font(.system(size: 12, weight: .semibold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                                        Text(accountCaption(storage)).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted).lineLimit(1)
+                                        Text(provider.title).font(.system(size: 12, weight: .semibold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                        Text(accountCaption(provider)).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted).lineLimit(1)
                                     }
                                     Spacer(minLength: 4)
-                                    Circle().fill(manager.mounted.contains(storage) ? Color.green : ShelfTheme.muted.opacity(0.3)).frame(width: 7, height: 7)
+                                    Circle().fill(manager.mounted.contains { $0.provider == provider } ? Color.green : ShelfTheme.muted.opacity(0.3)).frame(width: 7, height: 7)
                                 }.padding(.vertical, 6).padding(.horizontal, 8).contentShape(Rectangle())
-                            }.buttonStyle(.plain).help(storage.title + " · " + storage.provider.title)
+                            }.buttonStyle(.plain).help("Show \(provider.title) spaces")
                         }
                     }
                 }.frame(maxHeight: 190)
@@ -310,9 +311,14 @@ struct Dashboard: View {
         }.padding(18).frame(width: 250).frame(maxHeight: .infinity).background(Color.white.opacity(0.5))
             .overlay(alignment: .trailing) { Rectangle().fill(ink.opacity(0.07)).frame(width: 1) }
     }
-    private func accountCaption(_ storage: Storage) -> String {
-        var parts = [storage.provider.title]
-        if let used = manager.usage[storage.id], used.isReported || used.measured == true { parts.append(ByteCountFormatter.string(fromByteCount: used.usedBytes, countStyle: .file)) }
+    private var accountTypes: [Provider] {
+        Provider.allCases.filter { provider in manager.connections.contains { $0.provider == provider } }
+    }
+    private func accountCaption(_ provider: Provider) -> String {
+        let spaces = manager.connections.filter { $0.provider == provider }
+        var parts = ["\(spaces.count) \(spaces.count == 1 ? "space" : "spaces")"]
+        let measured = spaces.compactMap { manager.usage[$0.id] }.filter { $0.isReported || $0.measured == true }
+        if !measured.isEmpty { parts.append(ByteCountFormatter.string(fromByteCount: measured.reduce(0) { $0 + $1.usedBytes }, countStyle: .file)) }
         return parts.joined(separator: " · ")
     }
     private func navItem(_ title: String, symbol: String, page: DashboardPage, badge: String?) -> some View {
@@ -333,6 +339,18 @@ struct Dashboard: View {
     }
     private func nav(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Label(title, systemImage: symbol).font(.system(size: 13)).padding(12).frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.plain)
+    }
+    private var totalsPanel: some View {
+        let totals = manager.shelfTotals
+        return HStack(alignment: .top, spacing: 12) {
+            metric(ByteCountFormatter.string(fromByteCount: totals.storedBytes, countStyle: .file), label: "Total stored on your shelf", symbol: "tray.full")
+            if totals.quotaCapacity > 0 {
+                metric(ByteCountFormatter.string(fromByteCount: totals.quotaLeft, countStyle: .file), label: "Free of \(ByteCountFormatter.string(fromByteCount: totals.quotaCapacity, countStyle: .file)) in \(totals.quotaAccounts) account\(totals.quotaAccounts == 1 ? "" : "s") with a plan", symbol: "chart.pie")
+            }
+            if totals.freeTierCapacity > 0 {
+                metric(ByteCountFormatter.string(fromByteCount: totals.freeTierLeft, countStyle: .file), label: totals.freeTierLeft == 0 ? "Free tier used up · pay as you go" : "Free tier left of \(ByteCountFormatter.string(fromByteCount: totals.freeTierCapacity, countStyle: .file))", symbol: "gift")
+            }
+        }
     }
     private func metric(_ value: String, label: String, symbol: String) -> some View {
         HStack(spacing: 12) {

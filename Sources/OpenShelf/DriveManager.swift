@@ -174,6 +174,12 @@ final class DriveManager: ObservableObject {
             return (storage.id, storage.provider, poolKey(storage), value.usedBytes)
         })
     }
+    var shelfTotals: ShelfTotals {
+        ShelfTotals.make(connections.compactMap { storage in
+            guard let value = usage[storage.id], value.isReported || value.measured == true else { return nil }
+            return (storage.id, storage.provider, poolKey(storage), value)
+        })
+    }
     /// Storage (pooled free tier) plus Cloudflare request charges when analytics are connected.
     func monthlyCost(_ storage: Storage) -> Double? {
         guard let base = storageCosts[storage.id] else { return nil }

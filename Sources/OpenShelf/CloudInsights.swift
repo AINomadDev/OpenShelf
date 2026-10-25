@@ -139,3 +139,41 @@ enum AlertTracker {
 }
 
 enum AlertSeverity { static let none = 0, warning = 1, critical = 2 }
+
+/// Everything on the shelf combined: data stored, fixed account quotas and what is left of pay-as-you-go free tiers.
+struct ShelfTotals: Equatable {
+    var storedBytes: Int64 = 0
+    var quotaUsed: Int64 = 0
+    var quotaCapacity: Int64 = 0
+    var quotaAccounts = 0
+    var freeTierUsed: Int64 = 0
+    var freeTierCapacity: Int64 = 0
+    var quotaLeft: Int64 { max(0, quotaCapacity - quotaUsed) }
+    var freeTierLeft: Int64 { max(0, freeTierCapacity - freeTierUsed) }
+
+    /// Spaces sharing one account report the same quota, so identical quota readings count once.
+    static func make(_ items: [(id: String, provider: Provider, pool: String?, usage: StorageUsage)]) -> ShelfTotals {
+        var totals = ShelfTotals()
+        var seenQuota = Set<String>()
+        var freeGroups: [String: Int64] = [:]
+        for item in items {
+            let usage = item.usage
+            if let total = usage.totalBytes {
+                guard seenQuota.insert("\(item.provider.rawValue)|\(total)|\(usage.usedBytes)").inserted else { continue }
+                totals.storedBytes += usage.usedBytes
+                totals.quotaUsed += usage.usedBytes
+                totals.quotaCapacity += total
+                totals.quotaAccounts += 1
+            } else {
+                totals.storedBytes += usage.usedBytes
+                if item.provider.freeTierBytes != nil { freeGroups[item.provider.rawValue + "|" + (item.pool ?? item.id), default: 0] += usage.usedBytes }
+            }
+        }
+        for (key, used) in freeGroups {
+            let provider = Provider(rawValue: String(key.split(separator: "|")[0]))
+            totals.freeTierUsed += used
+            totals.freeTierCapacity += provider?.freeTierBytes ?? 0
+        }
+        return totals
+    }
+}

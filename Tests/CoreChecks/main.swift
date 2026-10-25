@@ -300,3 +300,17 @@ step = AlertTracker.update(alertState, key: "x", level: 2); alertState = step.st
 step = AlertTracker.update(alertState, key: "x", level: 0); alertState = step.state; precondition(alertState.isEmpty)
 step = AlertTracker.update(alertState, key: "x", level: 1); precondition(step.notify)
 print("PASS: R2 analytics, pooled free tier, alert de-duplication")
+
+do {
+    let now = Date()
+    let gb: Int64 = 1_000_000_000
+    let totals = ShelfTotals.make([
+        ("a", .googleDrive, nil, StorageUsage(usedBytes: 60 * gb, totalBytes: 100 * gb, objects: nil, updated: now)),
+        ("b", .googleDrive, nil, StorageUsage(usedBytes: 60 * gb, totalBytes: 100 * gb, objects: nil, updated: now)),
+        ("c", .cloudflareR2, "acct", StorageUsage(usedBytes: 3 * gb, totalBytes: nil, objects: nil, updated: now)),
+        ("d", .cloudflareR2, "acct", StorageUsage(usedBytes: 4 * gb, totalBytes: nil, objects: nil, updated: now)),
+        ("e", .s3, nil, StorageUsage(usedBytes: 5 * gb, totalBytes: nil, objects: nil, updated: now)),
+    ])
+    precondition(totals.storedBytes == 72 * gb && totals.quotaLeft == 40 * gb && totals.quotaAccounts == 1 && totals.freeTierLeft == 3 * gb)
+    print("PASS: shelf totals dedupe quotas and pool free tier")
+}
