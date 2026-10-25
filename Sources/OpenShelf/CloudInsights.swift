@@ -38,7 +38,7 @@ enum R2Analytics {
           sum { requests } dimensions { actionType }
         }
         r2StorageAdaptiveGroups(limit: 1, filter: { datetime_geq: $start, datetime_leq: $end, bucketName: $bucket }, orderBy: [datetime_DESC]) {
-          max { objectCount payloadSize metadataSize }
+          max { objectCount payloadSize metadataSize } dimensions { datetime }
         }
       } }
     }
@@ -109,6 +109,7 @@ enum R2Analytics {
         if lower.contains("does not have access to the path") || lower.contains("unknown field") {
             return "Cloudflare changed the analytics schema or this account has no R2 analytics yet." + detail
         }
+        if status == 200, !messages.isEmpty { return "Cloudflare could not run the usage query." + detail }
         if status == 200 { return "Cloudflare returned no data for this bucket yet. Analytics can lag by several minutes." + detail }
         return "Cloudflare analytics failed (HTTP \(status))." + detail
     }

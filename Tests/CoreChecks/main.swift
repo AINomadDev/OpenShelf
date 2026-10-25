@@ -406,3 +406,10 @@ do {
     precondition(R2Analytics.failureReason(status: nil, data: nil).contains("internet"))
     print("PASS: Cloudflare failures explain what to fix and EU endpoints resolve")
 }
+
+do {
+    precondition(R2Analytics.query.contains("dimensions { datetime }"))
+    let bad = Data(#"{"errors":[{"message":"cannot order by datetime: it is neither aggregated, nor a dimension"}]}"#.utf8)
+    precondition(R2Analytics.failureReason(status: 200, data: bad).contains("cannot order by datetime"))
+    print("PASS: R2 storage query selects the datetime it orders by")
+}
