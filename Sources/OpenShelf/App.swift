@@ -368,7 +368,7 @@ struct Dashboard: View {
             Text("1. Choose a provider, name your space, and review access and startup preferences.")
             Text("2. Sign in with Google in your browser, finish Apple sign-in in Terminal, or provide scoped object-storage credentials (S3, GCS, Azure, Cloudflare R2, Backblaze B2, IDrive e2).")
             Text("3. Object storage defaults to Archive mode: copy files in, and open them only when needed to avoid download fees. Use the Activity page to check transfers before disconnecting.")
-            Text("Google accounts can reuse saved app credentials. iCloud is experimental and needs periodic reauthentication. OpenShelf adds no encryption layer.").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
+            Text("Google accounts can reuse saved app credentials. iCloud is experimental and needs periodic reauthentication. Object-storage spaces can optionally be encrypted when you add them.").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
             HStack {
                 Button("Full setup guide") { if let url = Bundle.main.url(forResource: "README", withExtension: "md") { NSWorkspace.shared.open(url) } }.buttonStyle(ShelfButtonStyle())
                 Spacer()
@@ -407,7 +407,7 @@ struct StorageCard: View {
             }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(storage.provider.title + (storage.provider.platformName.map { " · " + $0 } ?? "")).font(.system(size: 11, weight: .medium)).foregroundStyle(ink.opacity(0.8)).lineLimit(1)
+                    Text(storage.provider.title + (storage.provider.platformName.map { " · " + $0 } ?? "") + (storage.encrypted ? " · 🔒 Encrypted" : "")).font(.system(size: 11, weight: .medium)).foregroundStyle(ink.opacity(0.8)).lineLimit(1)
                     Text(storage.root.isEmpty ? "Account root" : storage.root).font(.system(size: 10, design: .monospaced)).foregroundStyle(ShelfTheme.muted)
                         .lineLimit(1).truncationMode(.middle).help(storage.root)
                 }
@@ -427,6 +427,7 @@ struct StorageCard: View {
                 Button("Measure size now") { manager.measureSize(storage) }.disabled(manager.usageRefreshing.contains(storage.id))
             }
             Button("Copy Finder path") { manager.copyPath(storage) }
+            if storage.encrypted { Button("Copy encryption recovery key") { manager.copyRecoveryKey(storage) } }
             Button("View log") { manager.showLog(storage) }
             if storage.provider.prefersArchive {
                 Button(storage.isArchive ? "Switch to live mode" : "Switch to archive mode") { manager.setMode(storage, storage.isArchive ? .live : .archive) }

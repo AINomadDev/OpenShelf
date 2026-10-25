@@ -9,17 +9,19 @@ struct CommandResult {
 }
 
 // Short diagnostic commands never block the main thread; interactive authentication uses Terminal.
-func runCommand(_ executable: URL, _ arguments: [String], environment: [String: String]? = nil, timeoutSeconds: TimeInterval = 25, suppliedProcess: Process? = nil) async throws -> CommandResult {
+func runCommand(_ executable: URL, _ arguments: [String], environment: [String: String]? = nil, timeoutSeconds: TimeInterval = 25, suppliedProcess: Process? = nil, input: Data? = nil) async throws -> CommandResult {
     try await Task.detached {
         let process = suppliedProcess ?? Process()
         let pipe = Pipe()
         process.executableURL = executable
         process.arguments = arguments
         if let environment { process.environment = environment }
-        process.standardInput = FileHandle.nullDevice
+        let inputPipe = input == nil ? nil : Pipe()
+        process.standardInput = inputPipe ?? FileHandle.nullDevice
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         try process.run()
+        if let input, let inputPipe { inputPipe.fileHandleForWriting.write(input); try? inputPipe.fileHandleForWriting.close() }
         let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
         let output = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -53,6 +55,16 @@ final class DriveManager: ObservableObject {
     func copyPath(_ storage: Storage) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(storage.mountPoint(home: home).path, forType: .string)
+    }
+    /// Copies the crypt section (obscured, not plain) so the space can be read with plain rclone elsewhere. The clipboard is cleared after a minute.
+    func copyRecoveryKey(_ storage: Storage) {
+        guard storage.encrypted, let text = try? String(contentsOf: storage.configURL(home: home), encoding: .utf8),
+              let start = text.range(of: "[\(storage.cryptRemote)]") else { notice = "No encryption key found for this space."; return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(String(text[start.lowerBound...]), forType: .string)
+        let marker = NSPasteboard.general.changeCount
+        notice = "Recovery key copied. Store it somewhere safe; the clipboard clears in 60 seconds."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { if NSPasteboard.general.changeCount == marker { NSPasteboard.general.clearContents() } }
     }
     @Published var spaceToRemove: Storage?
     @Published var spaceToEdit: Storage?

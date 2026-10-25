@@ -314,3 +314,21 @@ do {
     precondition(totals.storedBytes == 72 * gb && totals.quotaLeft == 40 * gb && totals.quotaAccounts == 1 && totals.freeTierLeft == 3 * gb)
     print("PASS: shelf totals dedupe quotas and pool free tier")
 }
+
+do {
+    let plain = try Storage.make(provider: .cloudflareR2, title: "Vault", root: "bucket/sub", existing: [], readOnly: false, autoMount: false)
+    let secure = try Storage.make(provider: .cloudflareR2, title: "Vault", root: "bucket/sub", existing: [], readOnly: false, autoMount: false, encrypted: true)
+    let imported = try Storage.make(provider: .cloudflareR2, title: "Vault", root: "b", existing: [], readOnly: false, autoMount: false, remote: "mine", encrypted: true)
+    precondition(plain.remotePath == plain.remote + ":bucket/sub" && !plain.encrypted)
+    precondition(secure.encrypted && secure.remotePath == secure.remote + "-crypt:" && secure.underlyingPath == secure.remote + ":bucket/sub")
+    precondition(!imported.encrypted, "saved remotes are never wrapped")
+    let decoded = try JSONDecoder().decode(Storage.self, from: JSONEncoder().encode(secure))
+    precondition(decoded.encrypted && decoded.remotePath == secure.remotePath)
+    let renamed = try secure.updating(title: "Other", root: "elsewhere", readOnly: false, autoMount: false, mode: .archive, existing: [secure])
+    precondition(renamed.root == "bucket/sub" && renamed.remotePath == secure.remotePath)
+    let section = CryptConfig.section(name: "x-crypt", target: "x:b", password: "P", salt: "S")
+    precondition(section.contains("type = crypt") && section.contains("remote = x:b") && section.contains("password2 = S"))
+    let secret = CryptConfig.randomSecret()
+    precondition(secret.count >= 40 && secret != CryptConfig.randomSecret() && !secret.contains("="))
+    print("PASS: optional encryption overlay, recovery section, legacy decoding")
+}

@@ -264,10 +264,12 @@ struct Storage: Codable, Identifiable, Hashable {
     // Display-only labels; safe to change while a drive is mounted.
     var tags: [String] = []
     var note: String = ""
+    // Files are encrypted client-side by an rclone crypt overlay in the same config file. Chosen at creation only.
+    var encrypted: Bool = false
     static let googleDrive = Storage(id: "googleDrive", provider: .googleDrive, title: "Google Drive", remote: "cloudshelf-google", backend: "drive", root: "", directory: "Google Drive", cacheKey: "googleDrive", port: 55731, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let iCloud = Storage(id: "iCloud", provider: .iCloud, title: "iCloud Drive", remote: "cloudshelf-icloud", backend: "iclouddrive", root: "", directory: "iCloud Drive", cacheKey: "iCloud", port: 55732, ownConfig: false, autoMount: true, readOnly: false, mode: .live)
     static let legacy: [Storage] = [.googleDrive, .iCloud]
-    enum CodingKeys: String, CodingKey { case id, provider, title, remote, backend, root, directory, cacheKey, port, ownConfig, autoMount, readOnly, mode, tags, note }
+    enum CodingKeys: String, CodingKey { case id, provider, title, remote, backend, root, directory, cacheKey, port, ownConfig, autoMount, readOnly, mode, tags, note, encrypted }
     func quota(for usage: StorageUsage?) -> QuotaStatus? {
         guard let usage, usage.isReported else { return nil }
         return QuotaStatus(used: usage.usedBytes, limit: usage.totalBytes ?? provider.freeTierBytes)
@@ -276,7 +278,9 @@ struct Storage: Codable, Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
     var symbol: String { provider.symbol }
     var isArchive: Bool { mode == .archive }
-    var remotePath: String { remote + ":" + root }
+    var cryptRemote: String { remote + "-crypt" }
+    var underlyingPath: String { remote + ":" + root }
+    var remotePath: String { encrypted ? cryptRemote + ":" : remote + ":" + root }
     // Installs made under the earlier "CloudShelf" name keep using their existing folders, so mounts, caches and credentials are never orphaned.
     static func folder(_ base: URL, _ relative: String) -> URL {
         let legacy = base.appendingPathComponent(relative + "/CloudShelf", isDirectory: true)
@@ -308,13 +312,15 @@ struct Storage: Codable, Identifiable, Hashable {
          + (isArchive ? ["--dir-cache-time", "30m", "--vfs-read-ahead", "0"] : [])
          + configArguments(home: home) + (readOnly ? ["--read-only"] : [])
     }
-    static func make(provider: Provider, title: String, root: String, existing: [Storage], readOnly: Bool, autoMount: Bool, remote: String? = nil, backend: String? = nil, archive: Bool? = nil) throws -> Storage {
+    static func make(provider: Provider, title: String, root: String, existing: [Storage], readOnly: Bool, autoMount: Bool, remote: String? = nil, backend: String? = nil, archive: Bool? = nil, encrypted: Bool = false) throws -> Storage {
         let label = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !label.isEmpty, label.count <= 80, !label.contains("/"), !label.contains(":"), !label.contains(where: { $0.isNewline }) else { throw StorageError.invalidName }
         guard !root.contains(where: { $0.isNewline }), !root.split(separator: "/").contains("..") else { throw StorageError.invalidRoot }
         let id = UUID().uuidString.lowercased()
         guard let port = (55733...65000).first(where: { value in !existing.contains(where: { $0.port == value }) }) else { throw StorageError.noPort }
-        return Storage(id: id, provider: provider, title: label, remote: remote ?? "openshelf-" + id, backend: backend ?? provider.backend, root: root.trimmingCharacters(in: CharacterSet(charactersIn: "/")), directory: Storage.folderName(title: label, provider: provider, id: id), cacheKey: id, port: port, ownConfig: remote == nil, autoMount: autoMount, readOnly: readOnly, mode: (archive ?? provider.prefersArchive) ? AccessMode.archive : AccessMode.live)
+        var storage = Storage(id: id, provider: provider, title: label, remote: remote ?? "openshelf-" + id, backend: backend ?? provider.backend, root: root.trimmingCharacters(in: CharacterSet(charactersIn: "/")), directory: Storage.folderName(title: label, provider: provider, id: id), cacheKey: id, port: port, ownConfig: remote == nil, autoMount: autoMount, readOnly: readOnly, mode: (archive ?? provider.prefersArchive) ? AccessMode.archive : AccessMode.live)
+        storage.encrypted = encrypted && remote == nil
+        return storage
     }
 }
 
@@ -328,7 +334,7 @@ extension Storage {
         if provider.isObjectStorage && cleanRoot.isEmpty { throw StorageError.invalidRoot }
         var copy = self
         copy.title = label
-        copy.root = cleanRoot
+        copy.root = encrypted ? root : cleanRoot
         copy.readOnly = readOnly
         copy.autoMount = autoMount
         copy.mode = provider.prefersArchive ? mode : .live
@@ -357,6 +363,7 @@ extension Storage {
         mode = try c.decodeIfPresent(AccessMode.self, forKey: .mode) ?? (provider.prefersArchive ? .archive : .live)
         tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        encrypted = try c.decodeIfPresent(Bool.self, forKey: .encrypted) ?? false
     }
 }
 
@@ -597,5 +604,19 @@ struct IdentityStore {
         guard let data = try? encoder.encode(items) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try? data.write(to: url, options: .atomic)
+    }
+}
+
+/// Client-side encryption through an rclone `crypt` remote layered over the real one.
+enum CryptConfig {
+    /// A random secret, URL-safe so it is a single clean config line.
+    static func randomSecret() -> String {
+        var generator = SystemRandomNumberGenerator()
+        let bytes = (0..<32).map { _ in UInt8.random(in: 0...255, using: &generator) }
+        return Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+    /// `password` and `salt` must already be obscured with `rclone obscure`.
+    static func section(name: String, target: String, password: String, salt: String) -> String {
+        "[\(name)]\ntype = crypt\nremote = \(target)\nfilename_encryption = standard\ndirectory_name_encryption = true\npassword = \(password)\npassword2 = \(salt)\n"
     }
 }

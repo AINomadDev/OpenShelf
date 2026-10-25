@@ -10,6 +10,7 @@ final class ConnectionDraft: ObservableObject {
     @Published var autoMount = true
     @Published var readOnly = false
     @Published var archive = true
+    @Published var encrypt = false
     @Published var reuseGoogleClient = true
     @Published var fields: [String: String] = [:]
     @Published var importing = false
@@ -51,6 +52,19 @@ final class ConnectionDraft: ObservableObject {
         try? FileManager.default.removeItem(at: url)
         guard FileManager.default.createFile(atPath: url.path, contents: Data(text.utf8), attributes: [.posixPermissions: 0o600]) else { throw CocoaError(.fileWriteUnknown) }
     }
+    // Appends a crypt remote over the real one. The generated secrets only ever live in the owner-only config file.
+    private func addCrypt(_ binary: URL, _ storage: Storage) async throws {
+        func obscured(_ secret: String) async throws -> String {
+            let result = try await runCommand(binary, ["obscure", "-"], input: Data((secret + "\n").utf8))
+            guard result.code == 0, let text = String(data: result.output, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { throw SetupError.encryption }
+            return text
+        }
+        let section = CryptConfig.section(name: storage.cryptRemote, target: storage.underlyingPath, password: try await obscured(CryptConfig.randomSecret()), salt: try await obscured(CryptConfig.randomSecret()))
+        let url = storage.configURL(home: home)
+        let existing = try String(contentsOf: url, encoding: .utf8)
+        try? FileManager.default.removeItem(at: url)
+        guard FileManager.default.createFile(atPath: url.path, contents: Data((existing + "\n" + section).utf8), attributes: [.posixPermissions: 0o600]) else { throw CocoaError(.fileWriteUnknown) }
+    }
     func connect(_ manager: DriveManager) async {
         guard !working, let binary = manager.rclone else { return }
         working = true
@@ -74,7 +88,7 @@ final class ConnectionDraft: ObservableObject {
                 return
             }
             if provider.isObjectStorage && root.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw SetupError.missing("bucket or container") }
-            let storage = try Storage.make(provider: provider, title: name, root: root, existing: manager.connections, readOnly: readOnly, autoMount: autoMount, archive: archive && provider.prefersArchive)
+            let storage = try Storage.make(provider: provider, title: name, root: root, existing: manager.connections, readOnly: readOnly, autoMount: autoMount, archive: archive && provider.prefersArchive, encrypted: encrypt && provider.isObjectStorage)
             pending = storage
             var values = ["type": provider.backend]
             func required(_ key: String, _ label: String) throws -> String {
@@ -125,6 +139,7 @@ final class ConnectionDraft: ObservableObject {
             case .other: throw SetupError.missing("provider")
             }
             try writeConfig(values, storage: storage)
+            if storage.encrypted { try await addCrypt(binary, storage) }
             message = "Testing access to this space…"
             try await validate(binary, storage)
             guard !cancelled else { throw SetupError.authorization }
@@ -251,7 +266,7 @@ final class ConnectionDraft: ObservableObject {
 }
 
 enum SetupError: LocalizedError {
-    case missing(String), noGoogleClient, authorization, access, endpoint, lineBreak, serviceAccount
+    case missing(String), noGoogleClient, authorization, access, endpoint, lineBreak, serviceAccount, encryption
     var errorDescription: String? {
         switch self {
         case .missing(let field): return "Please provide \(field)."
@@ -261,6 +276,7 @@ enum SetupError: LocalizedError {
         case .endpoint: return "Enter a valid HTTPS endpoint or SAS URL."
         case .lineBreak: return "Credential fields cannot contain line breaks."
         case .serviceAccount: return "Choose a Google service-account JSON credential file."
+        case .encryption: return "Could not prepare the encryption keys. Nothing was uploaded."
         }
     }
 }
@@ -434,6 +450,12 @@ struct AddStorageView: View {
                 }
                 Text("A separate Finder folder and cache will be created for this space.").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
             }
+            if draft.provider.isObjectStorage && !draft.importing {
+                ShelfSection(title: "Encrypt files", subtitle: "Optional. Chosen now and cannot be changed later.") {
+                    Toggle("Encrypt names and contents before upload", isOn: $draft.encrypt).toggleStyle(.switch).controlSize(.small)
+                    Text(draft.encrypt ? "Files look like random data in the provider's own console and apps, so only OpenShelf (or rclone with the recovery key) can read them. Losing the key means losing the files: copy the recovery key from the space's ⋯ menu and keep it safe." : "Off: files stay readable in the provider's own tools.").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if draft.provider.prefersArchive {
                 ShelfSection(title: "Use as archive", subtitle: "Recommended for object storage.") {
                     Toggle("Archive mode", isOn: $draft.archive).toggleStyle(.switch).controlSize(.small)
@@ -452,7 +474,7 @@ struct AddStorageView: View {
                 if draft.provider.isObjectStorage && !draft.importing {
                     Label("Provider charges for downloads and requests may apply. The connection test only reads metadata.", systemImage: "info.circle")
                 }
-                Label("Credentials stay in protected local rclone files. OpenShelf does not add an encryption layer or use Keychain.", systemImage: "lock.shield")
+                Label("Credentials stay in protected local rclone files. Encryption is optional for object storage and chosen when you add it. Keychain is not used.", systemImage: "lock.shield")
             }.font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
         }
     }
