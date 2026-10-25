@@ -138,6 +138,45 @@ struct StorageUsage: Codable, Equatable {
     var isReported: Bool { unsupported != true }
 }
 
+// Approximate public list prices (standard tier, US regions). Providers change these, so the UI says "estimate" and links to the source.
+struct PricingInfo: Equatable {
+    let storagePerGB: Double
+    let freeBytes: Int64?
+    let egress: String
+    let operations: String
+    let extra: String?
+    let url: URL
+    static let asOf = "late 2026"
+
+    /// Estimated monthly storage bill, after any free allowance. Excludes requests and egress.
+    func monthlyStorageCost(usedBytes: Int64) -> Double {
+        Double(max(usedBytes - (freeBytes ?? 0), 0)) / 1_000_000_000 * storagePerGB
+    }
+    static func dollars(_ value: Double) -> String {
+        value < 0.01 && value > 0 ? "<$0.01" : String(format: "$%.2f", value)
+    }
+}
+
+extension Provider {
+    var pricing: PricingInfo? {
+        switch self {
+        case .cloudflareR2:
+            return PricingInfo(storagePerGB: 0.015, freeBytes: 10_000_000_000, egress: "Free (no egress fees)", operations: "Writes $4.50 / million, reads $0.36 / million. 1M writes and 10M reads free each month.", extra: "Infrequent Access class: $0.01/GB-month.", url: URL(string: "https://developers.cloudflare.com/r2/pricing/")!)
+        case .backblazeB2:
+            return PricingInfo(storagePerGB: 0.0069, freeBytes: 10_000_000_000, egress: "Free up to 3x your stored data per month, then $0.01/GB", operations: "Free class A; small fees on some reads.", extra: nil, url: URL(string: "https://www.backblaze.com/cloud-storage/pricing")!)
+        case .idriveE2:
+            return PricingInfo(storagePerGB: 0.005, freeBytes: 10_000_000_000, egress: "Free allowance tied to stored data, then $0.01/GB (check your plan)", operations: "No request fees.", extra: "First-year promotional pricing is common.", url: URL(string: "https://www.idrive.com/e2/pricing")!)
+        case .gcs:
+            return PricingInfo(storagePerGB: 0.020, freeBytes: nil, egress: "About $0.12/GB to the internet (first 1 GB/month free)", operations: "Charged per 1,000 operations; list and write calls cost more than reads.", extra: "Cheaper archive classes exist: Nearline ~$0.010, Coldline ~$0.004, Archive ~$0.0012 per GB-month, with retrieval fees.", url: URL(string: "https://cloud.google.com/storage/pricing")!)
+        case .s3:
+            return PricingInfo(storagePerGB: 0.023, freeBytes: nil, egress: "About $0.09/GB to the internet (first 100 GB/month free)", operations: "Writes/lists $0.005 per 1,000; reads $0.0004 per 1,000.", extra: "Glacier classes cost far less to store but charge retrieval fees and delays.", url: URL(string: "https://aws.amazon.com/s3/pricing/")!)
+        case .azureBlob:
+            return PricingInfo(storagePerGB: 0.0208, freeBytes: nil, egress: "About $0.087/GB to the internet (first 100 GB/month free)", operations: "Roughly $0.05 per 10,000 writes; reads are cheaper.", extra: "Cool and Archive tiers lower storage cost but add retrieval fees.", url: URL(string: "https://azure.microsoft.com/pricing/details/storage/blobs/")!)
+        default: return nil
+        }
+    }
+}
+
 enum QuotaLevel { case unlimited, ok, warning, exceeded }
 
 // Pure usage-versus-allowance calculation so the dashboard and tests share one definition.

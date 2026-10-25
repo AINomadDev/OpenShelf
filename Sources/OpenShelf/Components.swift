@@ -117,3 +117,72 @@ struct UsageBar: View {
         }.frame(height: 6).accessibilityHidden(true)
     }
 }
+
+
+final class PopoverFlag: ObservableObject { @Published var shown = false }
+
+// Click-to-open pricing card. Uses a popover (not .help) so it can hold structured rows and a link.
+struct PricingButton: View {
+    let storage: Storage
+    let usedBytes: Int64?
+    @StateObject private var flag = PopoverFlag()
+    var body: some View {
+        if let pricing = storage.provider.pricing {
+            Button { flag.shown.toggle() } label: {
+                Image(systemName: "info.circle").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
+            }.buttonStyle(.plain).help("Pay-as-you-go pricing for \(storage.provider.title)")
+                .popover(isPresented: $flag.shown, arrowEdge: .bottom) { PricingCard(provider: storage.provider, pricing: pricing, usedBytes: usedBytes) }
+        }
+    }
+}
+
+struct PricingCard: View {
+    let provider: Provider
+    let pricing: PricingInfo
+    let usedBytes: Int64?
+    private func row(_ symbol: String, _ title: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 12)).foregroundStyle(ShelfTheme.color(provider)).frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 11, weight: .semibold))
+                Text(text).font(.system(size: 11)).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ProviderBadge(provider: provider, size: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(provider.title).font(.system(size: 14, weight: .semibold, design: .rounded))
+                    Text("Pay-as-you-go pricing (estimate)").font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+                }
+            }
+            Divider()
+            if let free = pricing.freeBytes {
+                row("gift", "Free tier", "\(UsageText.bytes(free)) of storage free each month. After that you pay as you go.")
+            }
+            row("internaldrive", "Storage", String(format: "$%.4f per GB-month (about $%.2f per TB)", pricing.storagePerGB, pricing.storagePerGB * 1000))
+            row("arrow.down.circle", "Egress (downloads)", pricing.egress)
+            row("arrow.left.arrow.right", "Requests", pricing.operations)
+            if let extra = pricing.extra { row("sparkles", "Good to know", extra) }
+            if let used = usedBytes {
+                Divider()
+                let cost = pricing.monthlyStorageCost(usedBytes: used)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Your estimated storage bill").font(.system(size: 11, weight: .semibold))
+                        Text(UsageText.bytes(used) + " stored" + (pricing.freeBytes.map { used > $0 ? " · free tier exhausted" : " · within free tier" } ?? "")).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+                    }
+                    Spacer()
+                    Text(cost == 0 ? "$0.00" : PricingInfo.dollars(cost) + "/mo").font(.system(size: 17, weight: .semibold, design: .rounded)).foregroundStyle(cost == 0 ? Color.green : ShelfTheme.ink)
+                }
+            }
+            HStack {
+                Link("Open \(provider.title) pricing", destination: pricing.url).font(.system(size: 11, weight: .medium))
+                Spacer()
+                Text("List prices, " + PricingInfo.asOf + ". Region and tier vary.").font(.system(size: 9)).foregroundStyle(ShelfTheme.muted)
+            }
+        }.padding(16).frame(width: 340).background(Color.white).foregroundStyle(ShelfTheme.ink)
+    }
+}

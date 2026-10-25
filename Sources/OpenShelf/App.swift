@@ -403,11 +403,12 @@ struct StorageCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(parts.used).font(.system(size: 22, weight: .semibold, design: .rounded)).tracking(-0.4).foregroundStyle(quota.level == .exceeded ? Color.red : ink)
                     if let limit = parts.limit { Text(limit).font(.system(size: 12)).foregroundStyle(ShelfTheme.muted) }
+                    PricingButton(storage: storage, usedBytes: value?.usedBytes)
                     Spacer(minLength: 4)
                     if let remaining = parts.remaining { Text(remaining).font(.system(size: 12, weight: .semibold)).foregroundStyle(quota.level == .warning ? Color.orange : ink) }
                 }
                 if quota.limit != nil { UsageBar(quota: quota) } else { Color.clear.frame(height: 6) }
-                Text(parts.warning ?? archiveCaption(parts.caption)).font(.system(size: 10)).foregroundStyle(parts.warning != nil ? Color.red : ShelfTheme.muted).lineLimit(2)
+                Text((parts.warning.map { $0 + (storage.provider.pricing.map { " (~" + PricingInfo.dollars($0.monthlyStorageCost(usedBytes: quota.used)) + "/mo)" } ?? "") }) ?? archiveCaption(parts.caption)).font(.system(size: 10)).foregroundStyle(parts.warning != nil ? Color.red : ShelfTheme.muted).lineLimit(2)
             } else {
                 let unreported = value?.isReported == false
                 Text(unreported ? (value?.measured == true ? UsageText.bytes(value?.usedBytes ?? 0) : "—") : "…").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(unreported && value?.measured != true ? ShelfTheme.muted : ink)

@@ -215,3 +215,12 @@ precondition(Provider.iCloud.accountName == "iCloud")
 let renamed = try tagged.updating(title: "New name", root: tagged.root, readOnly: false, autoMount: true, mode: .archive, keepFolder: true, existing: [tagged])
 precondition(renamed.title == "New name" && renamed.directory == tagged.directory && renamed.mountPoint(home: home) == tagged.mountPoint(home: home))
 print("PASS: iCloud account usage parsing and renaming a mounted space")
+
+let r2Price = Provider.cloudflareR2.pricing!
+precondition(r2Price.monthlyStorageCost(usedBytes: 5_000_000_000) == 0)
+precondition(abs(r2Price.monthlyStorageCost(usedBytes: 110_000_000_000) - 1.5) < 0.0001)
+precondition(Provider.gcs.pricing!.freeBytes == nil && abs(Provider.gcs.pricing!.monthlyStorageCost(usedBytes: 17_700_000_000) - 0.354) < 0.0001)
+precondition(Provider.googleDrive.pricing == nil && Provider.iCloud.pricing == nil)
+precondition(Provider.allCases.filter { $0.isObjectStorage && $0 != .other && $0 != .s3Compatible }.allSatisfy { $0.pricing != nil })
+precondition(PricingInfo.dollars(0.004) == "<$0.01" && PricingInfo.dollars(1.5) == "$1.50")
+print("PASS: pay-as-you-go pricing estimates")

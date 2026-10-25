@@ -113,6 +113,8 @@ Core checks cover preserved legacy paths, multiple accounts of the same provider
 - **Renaming:** the display name can be changed even while a drive is mounted; the Finder folder keeps its name until you next edit with the drive disconnected.
 - Account details are read in memory from your own rclone config and the Google Drive API; only the email, name or host is saved, never tokens or passwords.
 
+- **Pricing info:** the ⓘ button on object-storage cards opens a pay-as-you-go summary (storage per GB, egress, request fees, free tier) with an estimated monthly storage bill for what you have stored, and a link to the provider's pricing page. These are approximate list prices for standard tiers in US regions, so check the provider before relying on them.
+
 Run `./run.sh` (macOS/Linux) or `run.cmd` (Windows) to start the right app for your OS.
 
 ## Windows and Linux (preview)
