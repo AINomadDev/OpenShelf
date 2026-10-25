@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // Provider-reported usage and request counts. Pure parsing and cost maths; networking lives in DriveManager.
 
@@ -240,5 +241,89 @@ enum R2Buckets {
         case 409: return "A bucket with this name already exists in your account. Choose another name, or use it as is." + detail
         default: return "Cloudflare could not create the bucket (HTTP \(status))." + detail
         }
+    }
+}
+
+/// One-time setup: a broad Cloudflare token (API Tokens: Edit) mints the narrow tokens OpenShelf needs.
+/// The broad token is held in memory only; just the narrow results are saved.
+enum CloudflareProvisioning {
+    struct PermissionGroup: Equatable { let id: String; let name: String }
+    struct Minted: Equatable { let id: String; let value: String }
+
+    static let bucketKeyGroup = "Workers R2 Storage Bucket Item Write"
+    static let analyticsGroup = "Account Analytics Read"
+
+    private static func base(_ account: String, _ path: String) -> URL? {
+        guard account.range(of: "^[A-Za-z0-9]+$", options: .regularExpression) != nil else { return nil }
+        return URL(string: "https://api.cloudflare.com/client/v4/accounts/\(account)/tokens" + path)
+    }
+
+    static func permissionGroupsRequest(token: String, account: String) -> URLRequest? {
+        guard let url = base(account, "/permission_groups") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    static func parseGroups(_ data: Data) -> [PermissionGroup] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], (root["success"] as? Bool) != false else { return [] }
+        return (root["result"] as? [[String: Any]] ?? []).compactMap {
+            guard let id = $0["id"] as? String, let name = $0["name"] as? String else { return nil }
+            return PermissionGroup(id: id, name: name)
+        }
+    }
+
+    static func groupID(named name: String, in groups: [PermissionGroup]) -> String? {
+        groups.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.id
+    }
+
+    /// Resource key for one bucket that has no jurisdiction.
+    static func bucketResource(account: String, bucket: String) -> String { "com.cloudflare.edge.r2.bucket.\(account)_default_\(bucket)" }
+
+    static func createRequest(token: String, account: String, name: String, groupID: String, resources: [String: String], expires: Date) -> URLRequest? {
+        guard let url = base(account, "") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "name": name,
+            "expires_on": ISO8601DateFormatter().string(from: expires),
+            "policies": [["effect": "allow", "resources": resources, "permission_groups": [["id": groupID]]]],
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    static func analyticsResources(account: String) -> [String: String] { ["com.cloudflare.api.account.\(account)": "*"] }
+
+    static func parseMinted(_ data: Data) -> Minted? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let result = root["result"] as? [String: Any],
+              let id = result["id"] as? String, let value = result["value"] as? String, !id.isEmpty, !value.isEmpty else { return nil }
+        return Minted(id: id, value: value)
+    }
+
+    /// R2's S3 secret is the SHA-256 hex digest of the token value; the access key ID is the token's ID.
+    static func s3Secret(forTokenValue value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func failureReason(step: String, status: Int?, data: Data?) -> String {
+        guard let status else { return "Could not reach Cloudflare while \(step). Check your internet connection." }
+        var detail = ""
+        if let data, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let m = (root["errors"] as? [[String: Any]])?.first?["message"] as? String { detail = " Cloudflare said: \(m)" }
+        if status == 401 || status == 403 {
+            return "This token cannot do that (\(step), HTTP \(status)). Create an Account API token with Account → API Tokens → Edit, plus Workers R2 Storage → Edit, scoped to this account." + detail
+        }
+        return "Cloudflare failed \(step) (HTTP \(status))." + detail
+    }
+
+    /// Writes the account-wide analytics token owner-only, the same place the Edit details screen uses.
+    static func saveAnalyticsToken(_ token: String, home: URL, account: String) throws {
+        let url = Storage.accountTokenURL(home: home, account: account)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try Data(token.utf8).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

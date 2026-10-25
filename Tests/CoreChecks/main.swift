@@ -437,3 +437,30 @@ do {
     precondition(R2Buckets.failureReason(status: 409, data: nil)!.contains("already exists"))
     print("PASS: R2 bucket creation request and error mapping")
 }
+
+do {
+    let groups = CloudflareProvisioning.parseGroups(Data(#"{"success":true,"result":[{"id":"g1","name":"Workers R2 Storage Bucket Item Write"},{"id":"g2","name":"Account Analytics Read"}]}"#.utf8))
+    precondition(groups.count == 2)
+    precondition(CloudflareProvisioning.groupID(named: CloudflareProvisioning.bucketKeyGroup, in: groups) == "g1")
+    precondition(CloudflareProvisioning.groupID(named: "account analytics read", in: groups) == "g2")
+    precondition(CloudflareProvisioning.groupID(named: "Nope", in: groups) == nil)
+    precondition(CloudflareProvisioning.parseGroups(Data(#"{"success":false,"errors":[]}"#.utf8)).isEmpty)
+    precondition(CloudflareProvisioning.bucketResource(account: "acc1", bucket: "media") == "com.cloudflare.edge.r2.bucket.acc1_default_media")
+    let request = CloudflareProvisioning.createRequest(token: "t", account: "acc1", name: "n", groupID: "g1", resources: CloudflareProvisioning.analyticsResources(account: "acc1"), expires: Date(timeIntervalSince1970: 0))!
+    precondition(request.url?.path == "/client/v4/accounts/acc1/tokens" && request.httpMethod == "POST")
+    let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+    precondition(body["name"] as? String == "n" && body["expires_on"] as? String == "1970-01-01T00:00:00Z")
+    precondition(CloudflareProvisioning.createRequest(token: "t", account: "../x", name: "n", groupID: "g", resources: [:], expires: Date()) == nil)
+    precondition(CloudflareProvisioning.parseMinted(Data(#"{"result":{"id":"abc","value":"secret"}}"#.utf8)) == .init(id: "abc", value: "secret"))
+    precondition(CloudflareProvisioning.parseMinted(Data(#"{"result":{"id":"abc"}}"#.utf8)) == nil)
+    precondition(CloudflareProvisioning.s3Secret(forTokenValue: "abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    precondition(CloudflareProvisioning.failureReason(step: "creating a token", status: 403, data: nil).contains("API Tokens"))
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cfprov-" + UUID().uuidString)
+    try CloudflareProvisioning.saveAnalyticsToken("tok", home: dir, account: "acc1")
+    let saved = Storage.accountTokenURL(home: dir, account: "acc1")
+    let mode = (try FileManager.default.attributesOfItem(atPath: saved.path)[.posixPermissions] as! NSNumber).intValue
+    let contents = try String(contentsOf: saved, encoding: .utf8)
+    precondition(mode == 0o600 && contents == "tok")
+    try? FileManager.default.removeItem(at: dir)
+    print("PASS: Cloudflare token provisioning requests, S3 secret derivation and owner-only save")
+}

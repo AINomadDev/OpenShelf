@@ -27,6 +27,7 @@ final class ConnectionDraft: ObservableObject {
     @Published var creatingBucket = false
     @Published var bucketStatus: String?
     @Published var bucketOK = false
+    @Published var provisioning = false
     @Published var testingToken = false
     @Published var tagsText = ""
     @Published var ignoreText = ""
@@ -201,6 +202,58 @@ final class ConnectionDraft: ObservableObject {
         message = nil
     }
     /// Saves edited details. New credentials are written first and validated; the previous config is restored if the check fails.
+    /// With a broad token: creates the bucket, a bucket-scoped access key and (if the account has none) a read-only analytics token, then fills the form.
+    func provisionR2() {
+        let name = (fields["new_bucket"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let broad = (fields["broad_token"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        bucketOK = false
+        guard let account = EndpointInput.r2AccountID(fields["account_id"] ?? "") else { bucketStatus = "Enter your Cloudflare account ID above first."; return }
+        guard R2Buckets.isValidName(name) else { bucketStatus = "Bucket names are 3-63 characters: lowercase letters, digits and hyphens."; return }
+        guard !broad.isEmpty, !broad.contains("\n"), broad.count < 400 else { bucketStatus = "Paste the broad Cloudflare token first."; return }
+        provisioning = true; bucketStatus = "Working…"
+        let home = self.home
+        Task { @MainActor in
+            defer { provisioning = false }
+            @MainActor func send(_ request: URLRequest?, _ step: String) async -> Data? {
+                guard let request else { bucketStatus = "Could not build the \(step) request."; return nil }
+                let result = try? await URLSession.shared.data(for: request)
+                let status = (result?.1 as? HTTPURLResponse)?.statusCode
+                guard let data = result?.0, let status, (200...299).contains(status) else {
+                    bucketStatus = CloudflareProvisioning.failureReason(step: step, status: status, data: result?.0); return nil
+                }
+                return data
+            }
+            let create = R2Buckets.request(token: broad, account: account, bucket: name)
+            let created = try? await URLSession.shared.data(for: create ?? URLRequest(url: URL(string: "https://api.cloudflare.com")!))
+            let createStatus = (created?.1 as? HTTPURLResponse)?.statusCode
+            // An existing bucket is fine: the key is minted for it either way.
+            if createStatus != 409, let problem = R2Buckets.failureReason(status: createStatus, data: created?.0) { bucketStatus = problem; return }
+            guard let groupData = await send(CloudflareProvisioning.permissionGroupsRequest(token: broad, account: account), "listing permission groups") else { return }
+            let groups = CloudflareProvisioning.parseGroups(groupData)
+            guard let keyGroup = CloudflareProvisioning.groupID(named: CloudflareProvisioning.bucketKeyGroup, in: groups) else { bucketStatus = "Cloudflare did not list the permission \"\(CloudflareProvisioning.bucketKeyGroup)\" for this token."; return }
+            let expires = Calendar.current.date(byAdding: .year, value: 1, to: Date()) ?? Date()
+            guard let keyData = await send(CloudflareProvisioning.createRequest(token: broad, account: account, name: "OpenShelf \(name) key", groupID: keyGroup, resources: [CloudflareProvisioning.bucketResource(account: account, bucket: name): "*"], expires: expires), "creating the bucket access key"),
+                  let key = CloudflareProvisioning.parseMinted(keyData) else { if bucketStatus == "Working…" { bucketStatus = "Cloudflare did not return the new access key." }; return }
+            fields["access_key_id"] = key.id
+            fields["secret_access_key"] = CloudflareProvisioning.s3Secret(forTokenValue: key.value)
+            root = name
+            var note = "Bucket \(name) and a bucket-scoped access key are ready."
+            let hasAnalytics = FileManager.default.fileExists(atPath: Storage.accountTokenURL(home: home, account: account).path)
+            if hasAnalytics {
+                note += " Your saved analytics token was kept."
+            } else if let analyticsGroup = CloudflareProvisioning.groupID(named: CloudflareProvisioning.analyticsGroup, in: groups),
+                      let data = await send(CloudflareProvisioning.createRequest(token: broad, account: account, name: "OpenShelf analytics (read-only)", groupID: analyticsGroup, resources: CloudflareProvisioning.analyticsResources(account: account), expires: expires), "creating the analytics token"),
+                      let analytics = CloudflareProvisioning.parseMinted(data), (try? CloudflareProvisioning.saveAnalyticsToken(analytics.value, home: home, account: account)) != nil {
+                note += " A read-only analytics token was created and saved."
+            } else {
+                note += " The analytics token could not be created; add one later in Edit details."
+            }
+            fields["broad_token"] = ""
+            bucketOK = true
+            bucketStatus = note + " Continue to finish. Revoke the broad token in Cloudflare when you are done."
+        }
+    }
+
     /// Uses a token typed here if there is one, otherwise the token already saved for this Cloudflare account. Asks for a new token only when neither has access.
     func createR2Bucket() {
         let name = (fields["new_bucket"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -600,6 +653,11 @@ struct ProviderFields: View {
                     Text("Leave empty to use the token already saved for this Cloudflare account. If that one is read-only, paste a token that can edit R2 here; it is used once and never saved.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Button(draft.creatingBucket ? "Creating…" : "Create bucket") { draft.createR2Bucket() }
                         .buttonStyle(ShelfButtonStyle(prominent: false)).disabled(draft.creatingBucket)
+                    Divider()
+                    secretField("Or one broad token to set everything up (API Tokens: Edit + Workers R2 Storage: Edit)", text: draft.value("broad_token"))
+                    Text("OpenShelf uses it once, in memory, to create the bucket, a key limited to that bucket (expires in 1 year) and a read-only analytics token if you have none. Only those narrow credentials are saved. Revoke the broad token afterwards.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button(draft.provisioning ? "Setting up…" : "Create bucket, key and analytics token") { draft.provisionR2() }
+                        .buttonStyle(ShelfButtonStyle(prominent: false)).disabled(draft.provisioning || draft.creatingBucket)
                     if let status = draft.bucketStatus {
                         Label(status, systemImage: draft.bucketOK ? "checkmark.circle.fill" : "xmark.octagon").font(.system(size: 12)).foregroundStyle(draft.bucketOK ? Color.green : Color.red).fixedSize(horizontal: false, vertical: true)
                     }
