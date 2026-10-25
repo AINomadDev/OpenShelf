@@ -611,11 +611,14 @@ struct EditStorageView: View {
                                 let sharing = manager.spacesInAccount(of: storage).count
                                 Label(sharing > 1 ? "A token is saved and shared by \(sharing) spaces in this Cloudflare account." : "A token is saved.", systemImage: "checkmark.seal").font(.system(size: 12))
                                 Toggle("Remove saved token", isOn: $draft.removeToken)
+                                if let error = manager.insightErrors[storage.id] {
+                                    Label(error, systemImage: "xmark.octagon").font(.system(size: 12)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                                }
                             } else {
                                 Label("No token yet. Usage comes from listing the bucket.", systemImage: "exclamationmark.circle").font(.system(size: 12)).foregroundStyle(ShelfTheme.muted)
                             }
                             secretField("API token (Account Analytics: Read)", text: $draft.apiToken)
-                            Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read. It is stored once per Cloudflare account in an owner-only file and only sent to api.cloudflare.com.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+                            Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read, with Account Resources set to your account. Paste the token value (not the Token ID). It is stored once per Cloudflare account in an owner-only file and only sent to api.cloudflare.com.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     ShelfSection(title: "Labels", subtitle: "Shown on the card and searchable. Safe to change any time.") {

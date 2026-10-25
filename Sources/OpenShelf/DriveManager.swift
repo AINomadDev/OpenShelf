@@ -640,9 +640,10 @@ final class DriveManager: ObservableObject {
               let account = R2Analytics.accountID(fromHost: CredentialHealth.configValue("endpoint", in: text).flatMap { URL(string: $0)?.host }),
               let bucket = R2Analytics.bucket(of: storage.root) else { insightErrors[storage.id] = "Cloudflare token or bucket not set up."; return false }
         let request = R2Analytics.request(token: token, account: account, bucket: bucket)
-        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
-              let insight = R2Analytics.parse(data) else {
-            insightErrors[storage.id] = "Cloudflare analytics rejected the token. It needs Account Analytics: Read."
+        let result = try? await URLSession.shared.data(for: request)
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode
+        guard let data = result?.0, status == 200, let insight = R2Analytics.parse(data) else {
+            insightErrors[storage.id] = R2Analytics.failureReason(status: status, data: result?.0)
             return false
         }
         insightErrors[storage.id] = nil

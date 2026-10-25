@@ -396,3 +396,13 @@ do {
     precondition(Provider.allCases.allSatisfy { !InsightSupport.info($0).detail.isEmpty })
     print("PASS: account insight support is described for every provider")
 }
+
+do {
+    precondition(R2Analytics.accountID(fromHost: "abc123.r2.cloudflarestorage.com") == "abc123")
+    precondition(R2Analytics.accountID(fromHost: "abc123.eu.r2.cloudflarestorage.com") == "abc123")
+    let denied = Data(#"{"errors":[{"message":"not authorized to access this account"}]}"#.utf8)
+    precondition(R2Analytics.failureReason(status: 200, data: denied).contains("Account Analytics"))
+    precondition(R2Analytics.failureReason(status: 401, data: nil).contains("Token ID"))
+    precondition(R2Analytics.failureReason(status: nil, data: nil).contains("internet"))
+    print("PASS: Cloudflare failures explain what to fix and EU endpoints resolve")
+}

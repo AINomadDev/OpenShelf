@@ -82,9 +82,35 @@ enum R2Analytics {
         return R2Insight(storageBytes: payload + metadata, objects: objects, classA: a, classB: b, updated: now)
     }
 
+    /// Handles jurisdiction endpoints such as `<id>.eu.r2.cloudflarestorage.com` and `<id>.fedramp.r2...` too.
     static func accountID(fromHost host: String?) -> String? {
         guard let host, host.hasSuffix(".r2.cloudflarestorage.com") else { return nil }
-        return String(host.dropLast(".r2.cloudflarestorage.com".count))
+        let id = host.dropLast(".r2.cloudflarestorage.com".count).split(separator: ".").first.map(String.init)
+        return id?.isEmpty == false ? id : nil
+    }
+
+    /// Turns a failed analytics response into a message that says what to fix, instead of a generic "rejected".
+    static func failureReason(status: Int?, data: Data?) -> String {
+        guard let status else { return "Could not reach Cloudflare. Check your internet connection." }
+        var messages: [String] = []
+        if let data, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["errors"] {
+                for item in root[key] as? [[String: Any]] ?? [] { if let m = item["message"] as? String { messages.append(m) } }
+            }
+        }
+        let detail = messages.first.map { " Cloudflare said: \($0)" } ?? ""
+        let lower = detail.lowercased()
+        if status == 401 || lower.contains("authenticat") || lower.contains("invalid") && lower.contains("token") {
+            return "Cloudflare did not accept this token (HTTP \(status)). Paste the token value itself, not the Token ID, with no spaces." + detail
+        }
+        if status == 403 || lower.contains("not authorized") || lower.contains("permission") || lower.contains("access") {
+            return "The token is valid but lacks access. Give it Account → Account Analytics → Read and set Account Resources to include this account (not a single zone)." + detail
+        }
+        if lower.contains("does not have access to the path") || lower.contains("unknown field") {
+            return "Cloudflare changed the analytics schema or this account has no R2 analytics yet." + detail
+        }
+        if status == 200 { return "Cloudflare returned no data for this bucket yet. Analytics can lag by several minutes." + detail }
+        return "Cloudflare analytics failed (HTTP \(status))." + detail
     }
 }
 
