@@ -182,7 +182,7 @@ do {
     let edited = try r2.updating(title: " Family ", root: "/bucket/2024/", readOnly: true, autoMount: false, mode: .live, existing: [r2])
     precondition(edited.id == r2.id && edited.port == r2.port && edited.remote == r2.remote && edited.cacheKey == r2.cacheKey)
     precondition(edited.title == "Family" && edited.root == "bucket/2024" && edited.readOnly && !edited.autoMount && !edited.isArchive)
-    precondition(edited.directory == "Family · " + String(r2.id.prefix(8)))
+    precondition(edited.directory == "Family (Cloudflare R2) · " + String(r2.id.prefix(8)))
     for bad in [("", "bucket"), ("a/b", "bucket"), ("ok", ""), ("ok", "a/../b")] {
         precondition((try? r2.updating(title: bad.0, root: bad.1, readOnly: false, autoMount: true, mode: .archive, existing: [r2])) == nil)
     }

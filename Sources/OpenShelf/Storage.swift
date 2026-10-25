@@ -288,6 +288,8 @@ struct Storage: Codable, Identifiable, Hashable {
     func agentURL(home: URL) -> URL { Self.support(home: home).appendingPathComponent("agents/" + id + ".plist") }
     func configArguments(home: URL) -> [String] { ownConfig ? ["--config", configURL(home: home).path] : [] }
     // Explicit directory hints avoid Foundation probing a potentially stalled NFS mount.
+    /// Finder shows this name, so it carries the storage type as well as the title.
+    static func folderName(title: String, provider: Provider, id: String) -> String { "\(title) (\(provider.title)) · \(id.prefix(8))" }
     func mountPoint(home: URL) -> URL { (FileManager.default.fileExists(atPath: home.appendingPathComponent("CloudShelf").path) ? home.appendingPathComponent("CloudShelf", isDirectory: true) : home.appendingPathComponent("OpenShelf", isDirectory: true)).appendingPathComponent(directory, isDirectory: true) }
     func cache(home: URL) -> URL { Self.folder(home, "Library/Caches").appendingPathComponent(cacheKey) }
     /// Deletes macOS metadata clutter (._* and .DS_Store); mounts cannot filter these at write time.
@@ -296,7 +298,7 @@ struct Storage: Codable, Identifiable, Hashable {
     }
     func arguments(home: URL) -> [String] {
         ["nfsmount", remotePath, mountPoint(home: home).path,
-         "--addr", "127.0.0.1:0", "--option", "nolocks", "--option", "noappledouble",
+         "--addr", "127.0.0.1:0", "--volname", title, "--option", "nolocks", "--option", "noappledouble",
          "--cache-dir", cache(home: home).path,
          "--vfs-cache-mode", "full", "--vfs-cache-max-size", "5G",
          "--vfs-cache-min-free-space", "10G", "--vfs-cache-poll-interval", "10s",
@@ -312,7 +314,7 @@ struct Storage: Codable, Identifiable, Hashable {
         guard !root.contains(where: { $0.isNewline }), !root.split(separator: "/").contains("..") else { throw StorageError.invalidRoot }
         let id = UUID().uuidString.lowercased()
         guard let port = (55733...65000).first(where: { value in !existing.contains(where: { $0.port == value }) }) else { throw StorageError.noPort }
-        return Storage(id: id, provider: provider, title: label, remote: remote ?? "openshelf-" + id, backend: backend ?? provider.backend, root: root.trimmingCharacters(in: CharacterSet(charactersIn: "/")), directory: label + " · " + String(id.prefix(8)), cacheKey: id, port: port, ownConfig: remote == nil, autoMount: autoMount, readOnly: readOnly, mode: (archive ?? provider.prefersArchive) ? AccessMode.archive : AccessMode.live)
+        return Storage(id: id, provider: provider, title: label, remote: remote ?? "openshelf-" + id, backend: backend ?? provider.backend, root: root.trimmingCharacters(in: CharacterSet(charactersIn: "/")), directory: Storage.folderName(title: label, provider: provider, id: id), cacheKey: id, port: port, ownConfig: remote == nil, autoMount: autoMount, readOnly: readOnly, mode: (archive ?? provider.prefersArchive) ? AccessMode.archive : AccessMode.live)
     }
 }
 
@@ -333,7 +335,7 @@ extension Storage {
         if let newTags { copy.tags = newTags }
         if let newNote { copy.note = String(newNote.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200)).replacingOccurrences(of: "\n", with: " ") }
         // The two built-in accounts keep their fixed Finder folder names.
-        if !keepFolder, !Storage.legacy.contains(where: { $0.id == id }) { copy.directory = label + " · " + String(id.prefix(8)) }
+        if !keepFolder, !Storage.legacy.contains(where: { $0.id == id }) { copy.directory = Storage.folderName(title: label, provider: provider, id: id) }
         if copy.directory != directory, existing.contains(where: { $0.id != id && $0.directory == copy.directory }) { throw StorageError.invalidName }
         return copy
     }
