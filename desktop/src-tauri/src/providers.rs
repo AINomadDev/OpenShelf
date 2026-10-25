@@ -71,7 +71,7 @@ pub const PROVIDERS: &[Provider] = &[
         console_url: "https://cloud.digitalocean.com/spaces",
         steps: &["Create a Space and note its region.", "Generate a Spaces key pair under API.", "The endpoint is <region>.digitaloceanspaces.com."],
         fields: &[f("endpoint", "Endpoint", false, "https://nyc3.digitaloceanspaces.com"), S3_KEYS[0], S3_KEYS[1]] },
-    Provider { id: "s3c", title: "S3-compatible", backend: "s3", s3_flavor: Some("Other"), free_tier: None, charges_egress: true, price_per_gb: None,
+    Provider { id: "s3c", title: "S3-compatible storage", backend: "s3", s3_flavor: Some("Other"), free_tier: None, charges_egress: true, price_per_gb: None,
         egress_note: "Check your provider's download and request pricing.",
         console_url: "",
         steps: &["Create a bucket and access key in your provider's console.", "Copy the S3 endpoint and region."],
@@ -217,5 +217,27 @@ mod pricing_tests {
         let cfg = build_config(find("wasabi").unwrap(), &m).unwrap();
         assert!(cfg.contains(&("provider".to_string(), "Wasabi".to_string())));
         assert!(cfg.contains(&("endpoint".to_string(), "https://s3.eu-central-1.wasabisys.com".to_string())));
+    }
+}
+
+#[cfg(test)]
+mod catalogue_tests {
+    use super::*;
+
+    #[test]
+    fn matches_shared_catalogue() {
+        let doc: serde_json::Value = serde_json::from_str(include_str!("../../../providers.json")).unwrap();
+        let entries = doc["providers"].as_array().unwrap();
+        assert_eq!(entries.len(), PROVIDERS.len());
+        for entry in entries {
+            let id = entry["id"].as_str().unwrap();
+            let p = PROVIDERS.iter().find(|p| p.id == id).unwrap_or_else(|| panic!("missing {id}"));
+            assert_eq!(entry["title"], p.title, "{id} title");
+            assert_eq!(entry["backend"], p.backend, "{id} backend");
+            assert_eq!(entry["s3Flavor"].as_str(), p.s3_flavor, "{id} flavor");
+            assert_eq!(entry["freeTierBytes"].as_u64(), p.free_tier, "{id} free tier");
+            assert_eq!(entry["chargesEgress"].as_bool().unwrap(), p.charges_egress, "{id} egress");
+            assert_eq!(entry["pricePerGb"].as_f64(), p.price_per_gb, "{id} price");
+        }
     }
 }

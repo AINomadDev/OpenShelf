@@ -126,6 +126,8 @@ Core checks cover preserved legacy paths, multiple accounts of the same provider
 - **Backblaze B2, IDrive e2 and other S3 providers** expose no usage or billing API for storage keys (those live behind the account login), so their size comes from listing the bucket and costs are list-price estimates.
 - **Alerts:** macOS notifications fire once when a space crosses 80% or 100% of its allowance, nears or exceeds its budget, or uses up R2's free request allowance. They re-arm after the situation improves. Allow notifications for OpenShelf in System Settings.
 - **Shelf totals:** the dashboard shows everything stored across all spaces, the space left in accounts with a fixed plan (Google, iCloud; shared accounts count once) and what remains of the 10 GB free tiers.
+- **Windows/Linux app:** shows the same shelf totals (stored, free tier left, estimated monthly cost) and a per-type account list, with R2 spaces in one Cloudflare account sharing a free tier.
+- **Shared catalogue:** `providers.json` is the reference for provider names, backends, free tiers and list prices; tests on the Mac and desktop sides fail if either drifts from it.
 - **Sidebar:** *Your Accounts* lists one row per storage type (Google Drive, Cloudflare R2, Backblaze B2, IDrive e2…) with space count and size; click to filter. Also quick views, quick views, tag chips that filter spaces, an Add storage button and a status card with estimated cost, attention count and active uploads.
 - Releases: pushing a `v*` tag builds unsigned macOS, Windows and Linux artifacts (`.github/workflows/release.yml`).
 

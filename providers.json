@@ -1,0 +1,86 @@
+{
+  "_comment": "Shared reference for provider identity and list prices. Swift (Storage.swift) and Rust (providers.rs) are checked against it by scripts/test-core.sh and cargo test.",
+  "providers": [
+    {
+      "id": "r2",
+      "title": "Cloudflare R2",
+      "backend": "s3",
+      "s3Flavor": "Cloudflare",
+      "freeTierBytes": 10000000000,
+      "chargesEgress": false,
+      "pricePerGb": 0.015
+    },
+    {
+      "id": "b2",
+      "title": "Backblaze B2",
+      "backend": "b2",
+      "s3Flavor": null,
+      "freeTierBytes": 10000000000,
+      "chargesEgress": false,
+      "pricePerGb": 0.0069
+    },
+    {
+      "id": "e2",
+      "title": "IDrive e2",
+      "backend": "s3",
+      "s3Flavor": "IDrive",
+      "freeTierBytes": 10000000000,
+      "chargesEgress": false,
+      "pricePerGb": 0.005
+    },
+    {
+      "id": "s3",
+      "title": "Amazon S3",
+      "backend": "s3",
+      "s3Flavor": "AWS",
+      "freeTierBytes": null,
+      "chargesEgress": true,
+      "pricePerGb": 0.023
+    },
+    {
+      "id": "gcs",
+      "title": "Google Cloud Storage",
+      "backend": "google cloud storage",
+      "s3Flavor": null,
+      "freeTierBytes": null,
+      "chargesEgress": true,
+      "pricePerGb": 0.02
+    },
+    {
+      "id": "azure",
+      "title": "Azure Blob Storage",
+      "backend": "azureblob",
+      "s3Flavor": null,
+      "freeTierBytes": null,
+      "chargesEgress": true,
+      "pricePerGb": 0.0208
+    },
+    {
+      "id": "wasabi",
+      "title": "Wasabi",
+      "backend": "s3",
+      "s3Flavor": "Wasabi",
+      "freeTierBytes": null,
+      "chargesEgress": false,
+      "pricePerGb": 0.0069
+    },
+    {
+      "id": "do",
+      "title": "DigitalOcean Spaces",
+      "backend": "s3",
+      "s3Flavor": "DigitalOcean",
+      "freeTierBytes": null,
+      "chargesEgress": false,
+      "pricePerGb": 0.02
+    },
+    {
+      "id": "s3c",
+      "title": "S3-compatible storage",
+      "backend": "s3",
+      "s3Flavor": "Other",
+      "freeTierBytes": null,
+      "chargesEgress": true,
+      "pricePerGb": null
+    }
+  ]
+}

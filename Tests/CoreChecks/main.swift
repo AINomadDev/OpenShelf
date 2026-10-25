@@ -332,3 +332,18 @@ do {
     precondition(secret.count >= 40 && secret != CryptConfig.randomSecret() && !secret.contains("="))
     print("PASS: optional encryption overlay, recovery section, legacy decoding")
 }
+
+do {
+    struct Entry: Decodable { let id: String; let title: String; let backend: String; let s3Flavor: String?; let freeTierBytes: Int64?; let chargesEgress: Bool; let pricePerGb: Double? }
+    struct Catalogue: Decodable { let providers: [Entry] }
+    let catalogue = try JSONDecoder().decode(Catalogue.self, from: Data(contentsOf: URL(fileURLWithPath: "providers.json")))
+    let byID: [String: Provider] = ["r2": .cloudflareR2, "b2": .backblazeB2, "e2": .idriveE2, "s3": .s3, "gcs": .gcs, "azure": .azureBlob, "wasabi": .wasabi, "do": .digitalOceanSpaces, "s3c": .s3Compatible]
+    precondition(catalogue.providers.count == byID.count)
+    for entry in catalogue.providers {
+        guard let provider = byID[entry.id] else { fatalError("unmapped catalogue id \(entry.id)") }
+        precondition(provider.title == entry.title && provider.backend == entry.backend && provider.s3Flavor == entry.s3Flavor, "identity drift for \(entry.id)")
+        precondition(provider.freeTierBytes == entry.freeTierBytes && provider.chargesEgress == entry.chargesEgress, "free tier/egress drift for \(entry.id)")
+        precondition(provider.pricing?.storagePerGB == entry.pricePerGb, "price drift for \(entry.id)")
+    }
+    print("PASS: Swift providers match providers.json")
+}

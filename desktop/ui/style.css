@@ -7,3 +7,5 @@ main{padding:24px}.card{background:#1a2128;border-radius:12px;padding:16px;margi
 button{background:#2d6cdf;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer}button.sec{background:#2a333c}
 dialog{background:#1a2128;color:#e8edf2;border:0;border-radius:12px;min-width:420px}label{display:block;margin:8px 0}input,select{width:100%;padding:6px;box-sizing:border-box}
 input[type=checkbox]{width:auto}menu{display:flex;gap:8px;justify-content:flex-end;padding:0}
+.totals{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}.totals .card{flex:1;min-width:180px;margin:0}.totals b{display:block;font-size:22px}
+.accounts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}

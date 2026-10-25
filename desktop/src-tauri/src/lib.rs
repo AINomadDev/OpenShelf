@@ -4,3 +4,4 @@ pub mod providers;
 pub mod quota;
 pub mod store;
 pub mod mount;
+pub mod shelf;

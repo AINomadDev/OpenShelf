@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use openshelf_core::{mount, providers, quota, store::{self, Paths, Space}};
+use openshelf_core::{mount, providers, quota, shelf, store::{self, Paths, Space}};
 use serde::Serialize;
 use std::{collections::HashMap, process::{Command, Stdio}, time::{SystemTime, UNIX_EPOCH}};
 
@@ -15,6 +15,24 @@ fn view(paths: &Paths, space: Space, usage: &HashMap<String, quota::Usage>) -> V
     let u = usage.get(&space.id).cloned();
     let q = u.as_ref().map(|u| quota::quota(u.used, u.total.or(provider.and_then(|p| p.free_tier))));
     View { running: mount::is_running(paths, &space), space, usage: u, quota: q, provider }
+}
+
+#[tauri::command]
+async fn shelf_summary() -> Result<shelf::Shelf, String> {
+    let paths = Paths::system();
+    let usage = store::load_usage(&paths);
+    let spaces = store::load_spaces(&paths)?;
+    let pools: Vec<Option<String>> = spaces.iter().map(|s| {
+        if s.provider != "r2" { return None }
+        let text = std::fs::read_to_string(paths.conf(&s.id)).ok()?;
+        let line = text.lines().find_map(|l| l.strip_prefix("endpoint = "))?;
+        shelf::r2_account(line)
+    }).collect();
+    let items: Vec<shelf::Item> = spaces.iter().zip(pools).filter_map(|(s, pool)| {
+        let u = usage.get(&s.id)?;
+        Some(shelf::Item { provider: &s.provider, used: u.used, pool })
+    }).collect();
+    Ok(shelf::summarize(&items))
 }
 
 #[tauri::command]
@@ -158,7 +176,7 @@ async fn open_folder(id: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![catalogue, list_spaces, add_space, update_space, set_labels, start_space, stop_space, remove_space, transfers, refresh_usage, clean_junk, open_url, open_folder])
+        .invoke_handler(tauri::generate_handler![shelf_summary, catalogue, list_spaces, add_space, update_space, set_labels, start_space, stop_space, remove_space, transfers, refresh_usage, clean_junk, open_url, open_folder])
         .run(tauri::generate_context!())
         .expect("failed to run OpenShelf");
 }

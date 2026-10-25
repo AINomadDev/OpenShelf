@@ -7,7 +7,20 @@ const show = (e) => { $('err').textContent = e ? String(e) : ''; };
 const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const act = (fn) => async () => { try { show(''); await fn(); } catch (e) { show(e); } await render(); };
 
+async function renderShelf() {
+  const totals = $('totals'), accounts = $('accounts');
+  totals.replaceChildren(); accounts.replaceChildren();
+  let s; try { s = await call('shelf_summary'); } catch (e) { return; }
+  if (!s.types.length) return;
+  const tile = (value, label) => { const c = el('div', undefined, 'card'); c.append(el('b', value), el('span', label, 'muted')); totals.append(c); };
+  tile(fmt(s.stored), 'Total stored on your shelf');
+  if (s.free_tier_capacity) tile(fmt(s.free_tier_left), s.free_tier_left === 0 ? 'Free tier used up · pay as you go' : `Free tier left of ${fmt(s.free_tier_capacity)}`);
+  if (s.monthly_cost > 0) tile('$' + s.monthly_cost.toFixed(2), 'Estimated per month (list prices)');
+  for (const t of s.types) accounts.append(el('span', `${t.title} · ${t.spaces} ${t.spaces === 1 ? 'space' : 'spaces'} · ${fmt(t.used)}`, 'badge'));
+}
+
 async function render() {
+  renderShelf();
   let views = [];
   try { views = await call('list_spaces'); } catch (e) { show(e); }
   const root = $('spaces'); root.replaceChildren();
