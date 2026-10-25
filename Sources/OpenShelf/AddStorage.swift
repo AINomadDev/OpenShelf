@@ -19,6 +19,8 @@ final class ConnectionDraft: ObservableObject {
     @Published var message: String?
     @Published var replacingCredentials = false
     @Published var budgetText = ""
+    @Published var apiToken = ""
+    @Published var removeToken = false
     @Published var tagsText = ""
     @Published var note = ""
     private var authProcess: Process?
@@ -599,6 +601,16 @@ struct EditStorageView: View {
                             Toggle("Archive mode (avoid repeated downloads)", isOn: $draft.archive)
                         }
                     }
+                    if storage.provider == .cloudflareR2 {
+                        ShelfSection(title: "Cloudflare analytics", subtitle: "Optional. With a read-only API token OpenShelf reads your real storage and request counts from Cloudflare (no billed list requests) and estimates request charges.") {
+                            if manager.hasCloudflareToken(storage) && !draft.removeToken {
+                                Label("A token is saved.", systemImage: "checkmark.seal").font(.system(size: 12))
+                                Toggle("Remove saved token", isOn: $draft.removeToken)
+                            }
+                            secretField("API token (Account Analytics: Read)", text: $draft.apiToken)
+                            Text("Create it in Cloudflare → My Profile → API Tokens → Custom token → Account → Account Analytics → Read. It is stored in an owner-only file and only sent to api.cloudflare.com.").font(.caption).foregroundStyle(ShelfTheme.muted).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     if canReplaceCredentials && !locked {
                         ShelfSection(title: "Credentials", subtitle: "Saved credentials are never shown. Replace them to rotate keys.") {
                             Toggle("Replace credentials", isOn: $draft.replacingCredentials)
@@ -611,7 +623,7 @@ struct EditStorageView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { manager.spaceToEdit = nil }.buttonStyle(ShelfButtonStyle())
-                Button(draft.working ? "Saving…" : "Save") { manager.setBudget(Double(draft.budgetText.trimmingCharacters(in: .whitespaces)), for: storage); Task { await draft.saveEdits(manager, original: storage) } }
+                Button(draft.working ? "Saving…" : "Save") { manager.setBudget(Double(draft.budgetText.trimmingCharacters(in: .whitespaces)), for: storage); if storage.provider == .cloudflareR2 { if draft.removeToken { try? manager.saveCloudflareToken("", for: storage) } else if !draft.apiToken.isEmpty { do { try manager.saveCloudflareToken(draft.apiToken, for: storage) } catch { draft.message = error.localizedDescription; return } } }; Task { await draft.saveEdits(manager, original: storage) } }
                     .buttonStyle(ShelfButtonStyle(prominent: true)).disabled(draft.working)
             }
         }.padding(26).frame(width: 520, height: 600).background(ShelfTheme.paper)

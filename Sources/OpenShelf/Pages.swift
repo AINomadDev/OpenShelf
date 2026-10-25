@@ -147,6 +147,30 @@ struct CostsPage: View {
         }
     }
 
+    @ViewBuilder private func r2Block(_ storage: Storage) -> some View {
+        if storage.provider == .cloudflareR2 {
+            if let insight = manager.r2Insights[storage.id] {
+                VStack(alignment: .leading, spacing: 8) {
+                    opsBar("Class A (writes, lists)", used: insight.classA, free: R2Insight.freeClassA)
+                    opsBar("Class B (reads)", used: insight.classB, free: R2Insight.freeClassB)
+                    Text("Month to date from Cloudflare · request charges \(PricingInfo.dollars(insight.requestCost)) · updated \(insight.updated.formatted(date: .omitted, time: .shortened))").font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+                }
+            } else if let error = manager.insightErrors[storage.id] {
+                Label(error, systemImage: "exclamationmark.triangle").font(.system(size: 11)).foregroundStyle(Color.orange)
+            } else {
+                Label("Add a Cloudflare API token in Edit details to see request counts and request charges.", systemImage: "key").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted)
+            }
+        } else if storage.provider.isObjectStorage {
+            Label("\(storage.provider.title) has no usage or billing API for storage keys, so usage comes from listing the bucket.", systemImage: "info.circle").font(.system(size: 10)).foregroundStyle(ShelfTheme.muted)
+        }
+    }
+    private func opsBar(_ title: String, used: Int64, free: Int64) -> some View {
+        let quota = QuotaStatus(used: used, limit: free)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack { Text(title).font(.system(size: 11, weight: .medium)); Spacer(); Text("\(used.formatted()) of \(free.formatted()) free").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted) }
+            UsageBar(quota: quota)
+        }
+    }
     private func row(_ storage: Storage) -> some View {
         let value = manager.usage[storage.id]
         let cost = manager.monthlyCost(storage)
@@ -172,6 +196,7 @@ struct CostsPage: View {
                 if samples.count > 1 { Sparkline(values: samples.map { Double($0.bytes) }).frame(width: 140, height: 44) }
             }
             if let quota = storage.quota(for: value), quota.limit != nil { UsageBar(quota: quota) }
+            r2Block(storage)
             HStack(spacing: 18) {
                 if let growth, growth != 0 {
                     Label("\(growth > 0 ? "+" : "−")\(ByteCountFormatter.string(fromByteCount: Int64(abs(growth)), countStyle: .file)) per day", systemImage: "chart.line.uptrend.xyaxis")

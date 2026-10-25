@@ -280,3 +280,23 @@ let eventHome = FileManager.default.temporaryDirectory.appendingPathComponent("o
 EventStore(home: eventHome).save(events)
 precondition(EventStore(home: eventHome).load().count == ActivityLog.limit)
 print("PASS: activity log")
+
+let r2Json = #"{"data":{"viewer":{"accounts":[{"r2OperationsAdaptiveGroups":[{"sum":{"requests":1500000},"dimensions":{"actionType":"PutObject"}},{"sum":{"requests":300},"dimensions":{"actionType":"GetObject"}},{"sum":{"requests":50},"dimensions":{"actionType":"DeleteObject"}}],"r2StorageAdaptiveGroups":[{"max":{"objectCount":42,"payloadSize":9000000000,"metadataSize":1000}}]}]}}}"#
+let insight = R2Analytics.parse(Data(r2Json.utf8))!
+precondition(insight.classA == 1_500_000 && insight.classB == 300 && insight.objects == 42 && insight.storageBytes == 9_000_001_000)
+precondition(abs(insight.requestCost - 4.5) < 1e-9)
+precondition(R2Analytics.parse(Data(#"{"errors":[{"message":"x"}],"data":null}"#.utf8)) == nil)
+precondition(R2Analytics.bucket(of: "media/2026") == "media" && R2Analytics.bucket(of: "") == nil)
+precondition(R2Analytics.accountID(fromHost: "abc123.r2.cloudflarestorage.com") == "abc123" && R2Analytics.accountID(fromHost: "s3.example.com") == nil)
+let req = R2Analytics.request(token: "t", account: "acc", bucket: "b", now: Date(timeIntervalSince1970: 1_800_000_000))
+precondition(req.value(forHTTPHeaderField: "Authorization") == "Bearer t" && req.httpMethod == "POST" && String(data: req.httpBody!, encoding: .utf8)!.contains("r2OperationsAdaptiveGroups"))
+let pooled = FreeTierPool.costs([("a", .cloudflareR2, "acct", 8_000_000_000), ("b", .cloudflareR2, "acct", 12_000_000_000), ("c", .cloudflareR2, nil, 5_000_000_000), ("d", .gcs, nil, 10_000_000_000)])
+precondition(abs(pooled["a"]! - 0.06) < 1e-9 && abs(pooled["b"]! - 0.09) < 1e-9 && pooled["c"] == 0 && abs(pooled["d"]! - 0.2) < 1e-9)
+var alertState: [String: Int] = [:]
+var step = AlertTracker.update(alertState, key: "x", level: 1); alertState = step.state
+precondition(step.notify)
+step = AlertTracker.update(alertState, key: "x", level: 1); precondition(!step.notify)
+step = AlertTracker.update(alertState, key: "x", level: 2); alertState = step.state; precondition(step.notify)
+step = AlertTracker.update(alertState, key: "x", level: 0); alertState = step.state; precondition(alertState.isEmpty)
+step = AlertTracker.update(alertState, key: "x", level: 1); precondition(step.notify)
+print("PASS: R2 analytics, pooled free tier, alert de-duplication")

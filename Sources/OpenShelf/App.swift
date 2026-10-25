@@ -245,11 +245,14 @@ struct Dashboard: View {
                 Image(systemName: "cloud.fill").font(.system(size: 21)).frame(width: 41, height: 41).background(accent, in: RoundedRectangle(cornerRadius: 13))
                 Text("openshelf").font(.system(size: 20, weight: .bold, design: .rounded)).tracking(-0.7)
             }.padding(.bottom, 10)
+            ScrollView(showsIndicators: false) {
+              VStack(alignment: .leading, spacing: 18) {
             VStack(spacing: 4) {
                 navItem("My spaces", symbol: "square.grid.2x2.fill", page: .spaces, badge: String(manager.connections.count))
                 navItem("Activity", symbol: "waveform.path", page: .activity, badge: manager.activeTransfers > 0 ? "\(manager.activeTransfers)" : nil)
                 navItem("Costs & budgets", symbol: "chart.line.uptrend.xyaxis", page: .costs, badge: nil)
                 nav("Getting started", symbol: "book.closed") { manager.showingGuide = true }
+                Button { manager.showingAddStorage = true } label: { Label("Add storage", systemImage: "plus.circle.fill").font(.system(size: 13, weight: .semibold)).padding(12).frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.plain)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("QUICK VIEWS").font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(ShelfTheme.muted)
@@ -257,34 +260,60 @@ struct Dashboard: View {
                 quick("Archive spaces", symbol: "archivebox", filter: .archive, count: manager.connections.filter(\.isArchive).count)
                 quick("Needs attention", symbol: "exclamationmark.triangle", filter: .attention, count: manager.attentionCount, tint: manager.attentionCount > 0 ? .orange : nil)
             }.padding(.horizontal, 8)
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("YOUR ACCOUNTS").font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(ShelfTheme.muted)
                 ScrollView {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 2) {
                         ForEach(manager.connections) { storage in
                             Button { manager.showAllSpaces(); manager.searchText = storage.title } label: {
-                                HStack(spacing: 9) {
-                                    ProviderBadge(provider: storage.provider, size: 27)
-                                    Text(storage.title).font(.system(size: 12)).lineLimit(1)
-                                    Spacer()
-                                    Circle().fill(manager.mounted.contains(storage) ? Color.green : ShelfTheme.muted.opacity(0.3)).frame(width: 5, height: 5)
-                                }.padding(.vertical, 5)
+                                HStack(spacing: 10) {
+                                    ProviderBadge(provider: storage.provider, size: 30)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(storage.title).font(.system(size: 12, weight: .semibold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                        Text(accountCaption(storage)).font(.system(size: 10)).foregroundStyle(ShelfTheme.muted).lineLimit(1)
+                                    }
+                                    Spacer(minLength: 4)
+                                    Circle().fill(manager.mounted.contains(storage) ? Color.green : ShelfTheme.muted.opacity(0.3)).frame(width: 7, height: 7)
+                                }.padding(.vertical, 6).padding(.horizontal, 8).contentShape(Rectangle())
+                            }.buttonStyle(.plain).help(storage.title + " · " + storage.provider.title)
+                        }
+                    }
+                }.frame(maxHeight: 190)
+            }.padding(.horizontal, 4)
+            if !manager.allTags.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("TAGS").font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(ShelfTheme.muted)
+                    FlowLayout(spacing: 5) {
+                        ForEach(manager.allTags, id: \.self) { tag in
+                            Button { manager.page = .spaces; manager.searchText = tag } label: {
+                                Text(tag).font(.system(size: 10, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(ShelfTheme.accent.opacity(0.45), in: Capsule())
                             }.buttonStyle(.plain)
                         }
                     }
-                }.frame(maxHeight: 150)
-            }.padding(.horizontal, 8)
-            Spacer()
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: "leaf").font(.system(size: 24)).foregroundStyle(ShelfTheme.color(.googleDrive))
-                Text("Room for what’s next.").font(.system(size: 16, weight: .medium, design: .rounded))
-                Text("Your storage. Your bill. Your Mac.").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted)
-            }.padding(15).frame(maxWidth: .infinity, alignment: .leading).background(Color.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 15))
+                }.padding(.horizontal, 8)
+            }
+              }
+            }
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 8) {
+                if manager.connections.contains(where: { $0.provider.pricing != nil }) {
+                    Label("\(PricingInfo.dollars(manager.monthlyTotal)) / month est.", systemImage: "dollarsign.circle").font(.system(size: 12, weight: .semibold))
+                }
+                Label(manager.attentionCount == 0 ? "Everything looks fine" : "\(manager.attentionCount) need attention", systemImage: manager.attentionCount == 0 ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(.system(size: 11)).foregroundStyle(manager.attentionCount == 0 ? ShelfTheme.muted : Color.orange)
+                Label("\(manager.activeTransfers) active uploads", systemImage: "arrow.up.circle").font(.system(size: 11)).foregroundStyle(ShelfTheme.muted)
+            }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
             Button { manager.openLoginSettings() } label: {
                 Label(manager.loginStatus, systemImage: "power").font(.system(size: 10)).fixedSize(horizontal: false, vertical: true)
             }.buttonStyle(.plain).foregroundStyle(ShelfTheme.muted)
-        }.padding(20).frame(width: 200).frame(maxHeight: .infinity).background(Color.white.opacity(0.5))
+        }.padding(18).frame(width: 250).frame(maxHeight: .infinity).background(Color.white.opacity(0.5))
             .overlay(alignment: .trailing) { Rectangle().fill(ink.opacity(0.07)).frame(width: 1) }
+    }
+    private func accountCaption(_ storage: Storage) -> String {
+        var parts = [storage.provider.title]
+        if let used = manager.usage[storage.id], used.isReported || used.measured == true { parts.append(ByteCountFormatter.string(fromByteCount: used.usedBytes, countStyle: .file)) }
+        return parts.joined(separator: " · ")
     }
     private func navItem(_ title: String, symbol: String, page: DashboardPage, badge: String?) -> some View {
         let selected = manager.page == page && (page != .spaces || manager.quickFilter == .all)

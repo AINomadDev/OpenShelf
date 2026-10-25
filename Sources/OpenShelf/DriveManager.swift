@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import UserNotifications
 
 struct CommandResult {
     let code: Int32
@@ -62,6 +63,7 @@ final class DriveManager: ObservableObject {
     private var budgetStore: BudgetStore { BudgetStore(home: home) }
     private var historyStore: HistoryStore { HistoryStore(home: home) }
     private var eventStore: EventStore { EventStore(home: home) }
+    var allTags: [String] { Array(Set(connections.flatMap(\.tags))).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.prefix(12).map { $0 } }
     func logEvent(_ message: String) {
         events = ActivityLog.append(message, at: Date(), to: events)
         if !Self.isPreview { eventStore.save(events) }
@@ -97,6 +99,8 @@ final class DriveManager: ObservableObject {
         budgets = budgetStore.load()
         history = historyStore.load()
         events = eventStore.load()
+        r2Insights = InsightStore(home: home).load()
+        alertState = (try? JSONDecoder().decode([String: Int].self, from: Data(contentsOf: Storage.support(home: home).appendingPathComponent("alerts.json")))) ?? [:]
     }
     private func recordHistory() {
         guard !Self.isPreview else { return }
@@ -109,21 +113,73 @@ final class DriveManager: ObservableObject {
             changed = true
         }
         if changed { historyStore.save(history) }
+        evaluateAlerts()
+    }
+    /// Fires a macOS notification when a space's situation gets worse (never repeated until it improves and worsens again).
+    private func evaluateAlerts() {
+        guard !Self.isPreview, Bundle.main.bundleIdentifier != nil else { return }
+        var changed = false
+        for storage in connections {
+            var checks: [(String, Int, String)] = []
+            switch storage.quota(for: usage[storage.id])?.level {
+            case .exceeded?: checks.append(("quota", AlertSeverity.critical, "\(storage.title) has used up its allowance. Pay-as-you-go pricing now applies."))
+            case .warning?: checks.append(("quota", AlertSeverity.warning, "\(storage.title) is above 80% of its allowance."))
+            default: checks.append(("quota", AlertSeverity.none, ""))
+            }
+            switch budgetLevel(storage) {
+            case .exceeded: checks.append(("budget", AlertSeverity.critical, "\(storage.title) is over its monthly budget."))
+            case .nearing: checks.append(("budget", AlertSeverity.warning, "\(storage.title) is near its monthly budget."))
+            default: checks.append(("budget", AlertSeverity.none, ""))
+            }
+            if let insight = r2Insights[storage.id] {
+                let worst = max(insight.classAFraction, insight.classBFraction)
+                checks.append(("ops", worst >= 1 ? AlertSeverity.critical : worst >= 0.8 ? AlertSeverity.warning : AlertSeverity.none, "\(storage.title) is using its free monthly request allowance (\(Int(worst * 100))%)."))
+            }
+            for (kind, level, message) in checks {
+                let result = AlertTracker.update(alertState, key: kind + "|" + storage.id, level: level)
+                if result.state != alertState { alertState = result.state; changed = true }
+                if result.notify { notify(title: "OpenShelf", body: message); logEvent(message) }
+            }
+        }
+        if changed, let data = try? JSONEncoder().encode(alertState) {
+            let url = Storage.support(home: home).appendingPathComponent("alerts.json")
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+    private func notify(title: String, body: String) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title; content.body = body
+            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
     }
     func setBudget(_ value: Double?, for storage: Storage) {
         if let value, value > 0 { budgets[storage.id] = value } else { budgets[storage.id] = nil }
         budgetStore.save(budgets)
+        evaluateAlerts()
     }
-    func monthlyCost(_ storage: Storage) -> Double? {
-        guard let pricing = storage.provider.pricing, let value = usage[storage.id], value.isReported || value.measured == true else { return nil }
-        return pricing.monthlyStorageCost(usedBytes: value.usedBytes)
+    /// Pool key for providers whose free allowance is shared across a provider account (R2 account ID from the endpoint).
+    private func poolKey(_ storage: Storage) -> String? {
+        guard storage.provider == .cloudflareR2, storage.ownConfig,
+              let text = try? String(contentsOf: storage.configURL(home: home), encoding: .utf8),
+              let endpoint = CredentialHealth.configValue("endpoint", in: text) else { return nil }
+        return R2Analytics.accountID(fromHost: URL(string: endpoint)?.host)
     }
-    var monthlyTotal: Double {
-        CostSummary.monthlyTotal(connections.compactMap { storage in
+    private var storageCosts: [String: Double] {
+        FreeTierPool.costs(connections.compactMap { storage in
             guard let value = usage[storage.id], value.isReported || value.measured == true else { return nil }
-            return (storage.provider, value.usedBytes)
+            return (storage.id, storage.provider, poolKey(storage), value.usedBytes)
         })
     }
+    /// Storage (pooled free tier) plus Cloudflare request charges when analytics are connected.
+    func monthlyCost(_ storage: Storage) -> Double? {
+        guard let base = storageCosts[storage.id] else { return nil }
+        return base + (r2Insights[storage.id]?.requestCost ?? 0)
+    }
+    var monthlyTotal: Double { storageCosts.values.reduce(0, +) + connections.reduce(0) { $0 + (r2Insights[$1.id]?.requestCost ?? 0) } }
     func budgetLevel(_ storage: Storage) -> BudgetLevel { Budget.level(cost: monthlyCost(storage) ?? 0, budget: budgets[storage.id]) }
     /// Days until a free-tier space passes its allowance at the recent growth rate.
     func daysUntilFreeTier(_ storage: Storage) -> Int? {
@@ -206,6 +262,9 @@ final class DriveManager: ObservableObject {
     @Published var activity: [Storage: CacheActivity] = [:]
     @Published var usage: [String: StorageUsage] = [:] { didSet { recordHistory() } }
     @Published var budgets: [String: Double] = [:]
+    @Published var r2Insights: [String: R2Insight] = [:]
+    @Published var insightErrors: [String: String] = [:]
+    private var alertState: [String: Int] = [:]
     @Published var history: [String: [UsageSample]] = [:]
     @Published var identities: [String: AccountIdentity] = [:]
     private var identityRefreshing: Set<String> = []
@@ -543,6 +602,51 @@ final class DriveManager: ObservableObject {
     func refreshUsage(_ storage: Storage) {
         guard !Self.isPreview, !usageRefreshing.contains(storage.id), let binary = rclone else { return }
         if storage.provider == .iCloud { refreshICloudUsage(storage, binary: binary); return }
+        if storage.provider == .cloudflareR2, FileManager.default.fileExists(atPath: storage.apiTokenURL(home: home).path) {
+            usageRefreshing.insert(storage.id)
+            lastUsageAttempt[storage.id] = Date()
+            forceUsage.remove(storage.id)
+            Task { [weak self] in
+                guard let self else { return }
+                if await self.fetchR2Insight(storage) { self.usageRefreshing.remove(storage.id) }
+                else { self.usageRefreshing.remove(storage.id); self.refreshUsageViaRclone(storage, binary: binary) }
+            }
+            return
+        }
+        refreshUsageViaRclone(storage, binary: binary)
+    }
+    /// Reads month-to-date storage and request counts from Cloudflare. Returns false when it could not, so the caller can fall back to listing.
+    private func fetchR2Insight(_ storage: Storage) async -> Bool {
+        guard let token = (try? String(contentsOf: storage.apiTokenURL(home: home), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty,
+              let text = try? String(contentsOf: storage.configURL(home: home), encoding: .utf8),
+              let account = R2Analytics.accountID(fromHost: CredentialHealth.configValue("endpoint", in: text).flatMap { URL(string: $0)?.host }),
+              let bucket = R2Analytics.bucket(of: storage.root) else { insightErrors[storage.id] = "Cloudflare token or bucket not set up."; return false }
+        let request = R2Analytics.request(token: token, account: account, bucket: bucket)
+        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
+              let insight = R2Analytics.parse(data) else {
+            insightErrors[storage.id] = "Cloudflare analytics rejected the token. It needs Account Analytics: Read."
+            return false
+        }
+        insightErrors[storage.id] = nil
+        r2Insights[storage.id] = insight
+        InsightStore(home: home).save(r2Insights)
+        usage[storage.id] = StorageUsage(usedBytes: insight.storageBytes, totalBytes: nil, objects: insight.objects, updated: Date())
+        usageStore.save(usage)
+        return true
+    }
+    func saveCloudflareToken(_ token: String, for storage: Storage) throws {
+        let url = storage.apiTokenURL(home: home)
+        let clean = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { try? FileManager.default.removeItem(at: url); r2Insights[storage.id] = nil; insightErrors[storage.id] = nil; InsightStore(home: home).save(r2Insights); return }
+        guard !clean.contains("\n"), clean.count < 400 else { throw StorageError.invalidToken }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try Data(clean.utf8).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        forceUsage.insert(storage.id)
+        lastUsageAttempt[storage.id] = nil
+    }
+    func hasCloudflareToken(_ storage: Storage) -> Bool { FileManager.default.fileExists(atPath: storage.apiTokenURL(home: home).path) }
+    private func refreshUsageViaRclone(_ storage: Storage, binary: URL) {
         guard storage.provider.reportsQuota else {
             usage[storage.id] = .unreported(previous: usage[storage.id])
             usageStore.save(usage)

@@ -374,11 +374,12 @@ enum EndpointInput {
 }
 
 enum StorageError: LocalizedError {
-    case invalidName, invalidRoot, noPort, invalidManifest, busy
+    case invalidName, invalidRoot, noPort, invalidManifest, busy, invalidToken
     var errorDescription: String? {
         switch self {
         case .invalidName: return "Choose a name of 1–80 characters without slashes, colons, or line breaks."
         case .invalidRoot: return "Use a folder, bucket, or container path without parent traversal or line breaks."
+        case .invalidToken: return "That API token does not look valid."
         case .busy: return "Disconnect this space before editing it."
         case .noPort: return "No free account control endpoint is available."
         case .invalidManifest: return "Saved connections could not be loaded safely. Your cloud files and credentials have not been changed."
