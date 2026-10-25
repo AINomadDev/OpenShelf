@@ -29,10 +29,11 @@ OpenShelf mounts cloud storage as folders using rclone ("Bring Your Own Storage"
 - Never commit credentials, tokens, keys, passwords, emails, phone numbers, cloud project names or absolute home paths (`/Users/...`).
 - Credentials live only in owner-only (0600) files outside the repo and never in process arguments or the connection manifest.
 - Before every push, scan changed files for private-key blocks, `AKIA…`, `AIza…`, `gh[pous]_…` and `/Users/`.
+- Before every push, also run the security review (`.github/prompts/security-review.prompt.md`) using the vendored `.agents/skills/security-audit/` skill in guidance mode on the changed files, and fix or report what it finds.
 - Scratch plans, todo lists and temporary artifacts go in `.local/<task-name>/artifacts/` (git-ignored).
 
 ## Skills, prompts, agents
 
-- Skill: `.agents/skills/openshelf-dev/SKILL.md` (mirrored for Claude in `.claude/skills/`).
+- Skills: `.agents/skills/openshelf-dev/SKILL.md` and `.agents/skills/security-audit/` (vendored from [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill), MIT, commit c1c8a8c; update by re-copying). Both are mirrored for Claude in `.claude/skills/`.
 - Prompts: `.github/prompts/*.prompt.md` (same text is usable in any assistant).
 - Review agent: `.github/agents/reviewer.agent.md` and `.claude/agents/reviewer.md`.

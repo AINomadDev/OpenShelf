@@ -22,6 +22,8 @@ Read `AGENTS.md` first.
 
 ## Before pushing
 
+Run the `security-audit` skill (`.agents/skills/security-audit/SKILL.md`) in guidance mode on the changed files first. Then:
+
 Scan changed files for secrets and personal data:
 
 ```
